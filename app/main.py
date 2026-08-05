@@ -163,8 +163,39 @@ async def extract(limit: int | None = 50):
             result = extract_transaction(
                 app.state.anthropic, tx.raw_subject, tx.raw_from, tx.raw_body
             )
+
+            if not result.is_transaction:
+                await app.state.store.delete_non_transaction(tx.message_id)
+                skipped_non_transaction += 1
+            elif result.confidence < CONFIDENCE_THRESHOLD:
+                await app.state.store.set_low_confidence(tx.message_id, result.confidence)
+                await app.state.store.flag_email(
+                    message_id=tx.message_id,
+                    raw_body=tx.raw_body,
+                    error_message=f"low confidence: {result.model_dump_json()}",
+                    flagged_reason="low_confidence",
+                )
+                flagged_low_confidence += 1
+            else:
+                await app.state.store.apply_extraction(
+                    message_id=tx.message_id,
+                    date=result.date,
+                    merchant=result.merchant,
+                    amount=result.amount,
+                    currency=result.currency,
+                    category=result.category,
+                    payment_method=result.payment_method,
+                    confidence=result.confidence,
+                    is_transfer=result.is_transfer,
+                )
+                extracted += 1
         except Exception as exc:
             logger.exception("extraction failed for message %s", tx.message_id)
+            # A failed query leaves the shared connection's transaction
+            # aborted until rolled back — without this, every subsequent
+            # query on this connection (including the flag_email below,
+            # and every later request) would fail too.
+            await app.state.db_conn.rollback()
             await app.state.store.flag_email(
                 message_id=tx.message_id,
                 raw_body=tx.raw_body,
@@ -172,32 +203,6 @@ async def extract(limit: int | None = 50):
                 flagged_reason="extraction_error",
             )
             failed += 1
-            continue
-
-        if not result.is_transaction:
-            await app.state.store.delete_non_transaction(tx.message_id)
-            skipped_non_transaction += 1
-        elif result.confidence < CONFIDENCE_THRESHOLD:
-            await app.state.store.set_low_confidence(tx.message_id, result.confidence)
-            await app.state.store.flag_email(
-                message_id=tx.message_id,
-                raw_body=tx.raw_body,
-                error_message=f"low confidence: {result.model_dump_json()}",
-                flagged_reason="low_confidence",
-            )
-            flagged_low_confidence += 1
-        else:
-            await app.state.store.apply_extraction(
-                message_id=tx.message_id,
-                date=result.date,
-                merchant=result.merchant,
-                amount=result.amount,
-                currency=result.currency,
-                category=result.category,
-                payment_method=result.payment_method,
-                confidence=result.confidence,
-            )
-            extracted += 1
 
     return {
         "candidates": len(candidates),

@@ -13,6 +13,7 @@ Design notes:
   app.main).
 """
 
+import datetime as dt
 from typing import Literal
 
 from anthropic import Anthropic
@@ -32,10 +33,16 @@ purchase), and if so, extract its details.
 
 - is_transaction: false for anything that is not a completed transaction \
 (promotions, newsletters, login alerts, pending/failed transactions).
+- is_transfer: true when this is a fund movement rather than a real expense \
+— a bank transfer (Bank Transfer, BI Fast, etc.) to a personal name, the \
+account holder's own name, or another bank account, where the email gives \
+no indication it's paying for goods or a service. False for purchases, \
+bills, and payments to a merchant or service provider, even if the payment \
+method happens to be a bank transfer.
 - amount: the transaction amount in the original currency, as a plain number.
 - currency: always "IDR" for these senders.
 - category: your best guess from the fixed set given the merchant and \
-context.
+context. If is_transfer is true, this can still be your best guess or "other".
 - confidence: your genuine confidence (0.0-1.0) that the extracted fields are \
 correct. Use a low value when the email is ambiguous or the format is \
 unfamiliar — do not default to a high score."""
@@ -43,7 +50,12 @@ unfamiliar — do not default to a high score."""
 
 class ExtractionResult(BaseModel):
     is_transaction: bool
-    date: str | None = None  # ISO 8601 date, e.g. "2026-08-01"
+    is_transfer: bool = False
+    # A real date type (not str) puts a "format": "date" constraint on the
+    # generated JSON schema, so Claude is guided to emit "YYYY-MM-DD" instead
+    # of a localized string like "31 Mei 2026" — which Postgres's
+    # TIMESTAMPTZ column rejects outright.
+    date: dt.date | None = None
     merchant: str | None = None
     amount: float | None = None
     currency: str = "IDR"

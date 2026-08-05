@@ -220,6 +220,7 @@ class Store:
         category: str | None,
         payment_method: str | None,
         confidence: float,
+        is_transfer: bool = False,
     ) -> None:
         """Write a confident extraction result into transactions and mark it
         as extracted (excludes it from future get_unextracted_transactions
@@ -230,10 +231,10 @@ class Store:
                 UPDATE transactions
                 SET date = %s, merchant = %s, amount = %s, currency = %s,
                     category = %s, payment_method = %s, confidence = %s,
-                    extracted_at = now()
+                    is_transfer = %s, extracted_at = now()
                 WHERE message_id = %s
                 """,
-                (date, merchant, amount, currency, category, payment_method, confidence, message_id),
+                (date, merchant, amount, currency, category, payment_method, confidence, is_transfer, message_id),
             )
         await self._conn.commit()
 
