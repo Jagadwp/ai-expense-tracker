@@ -11,7 +11,7 @@ surfaces it through a dashboard and a natural-language Q&A agent.
 ## Current status
 
 **Milestones M1 through M4 are implemented and tested end-to-end against a
-real Gmail account.**
+real Gmail account. M5 (dashboard) is in progress — see below.**
 
 | Milestone | Status |
 |---|---|
@@ -19,9 +19,15 @@ real Gmail account.**
 | M2 — Email fetch, dedup, raw ingestion | ✅ Done |
 | M3 — IMAP IDLE + scheduled sync | ✅ Done |
 | M4 — LLM extraction (Claude Haiku 4.5) | ✅ Done |
-| M5 — Dashboard (Streamlit) | Not started |
+| M5 — Dashboard (Vue SPA + REST API) | In progress |
 | M6 — Q&A agent (text-to-SQL) | Not started |
 | M7 — Alerts, deploy | Not started |
+
+**M5 was originally built with Streamlit, then swapped to a Vue 3 SPA** after
+a native crash in Streamlit's pyarrow dependency (`SIGSEGV` in `mimalloc`,
+exit code 139) on filter interaction — see the v4.1 changelog in
+`document/PRD.md`. A real SPA over a REST API also better demonstrates
+full-stack capability than a data-app-style dashboard.
 
 ## What's built so far
 
@@ -94,6 +100,12 @@ batch.
 | `DELETE /auth/google` | Disconnect the Gmail account |
 | `POST /sync?newer_than=7d` | Manually trigger a sync |
 | `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`) |
+| `GET /api/transactions?date_from=&date_to=` | List extracted transactions in range (filters: `category`, `sort_by`, `include_transfers`) |
+| `GET /api/categories` | Distinct categories present in extracted transactions |
+| `GET /api/available-months` | Months (`YYYY-MM`) with at least one extracted transaction, for the "by month" shortcut |
+| `GET /api/summary/category-totals?date_from=&date_to=` | Total spend per category in range, excluding transfers |
+| `GET /api/summary/trend?date_from=&date_to=` | Total spend per day in range, excluding transfers |
+| `GET /api/summary/period-comparison?date_from=&date_to=` | Total spend in range vs the immediately preceding period of the same length, excluding transfers |
 
 The FastAPI `lifespan` also starts the scheduler and the IMAP IDLE listener,
 so a single `uvicorn app.main:app` process runs the HTTP server, the
@@ -123,11 +135,44 @@ WHERE message_id = '...';
 DELETE FROM flagged_emails WHERE message_id = '...';
 ```
 
+**`is_transfer` (added after the initial M4 pass):** bank/e-wallet emails
+include fund movements (e.g. transferring salary into savings) that are not
+real expenses. `transactions.is_transfer` is a separate boolean from
+`category` — Claude sets it during extraction for transfers to personal or
+own-account names with no indication of a purchase — and the dashboard
+excludes `is_transfer = true` rows from spend totals while still listing
+them for audit.
+
+### Dashboard (M5) — Vue SPA + REST API
+Read-only queries (`list_transactions`, `list_available_months`,
+`category_totals`, `spend_trend`, `period_comparison`) live on `Store`
+alongside the rest of the app's database access, and are exposed over a
+REST API (see the routes table below) instead of being queried directly
+from the dashboard process. Every query takes an explicit
+`date_from`/`date_to` range — there is no month-string filter. All spend
+aggregates exclude `is_transfer = true` rows.
+
+`frontend/` (Vue 3 + Vite, plain CSS — light/minimalist theme) consumes that
+API:
+- A date-range picker: native `<input type="date">` from/to fields, quick
+  presets (7D/1M/3M/6M/1Y), and a "by month" shortcut scoped to months that
+  actually have data — picking a month snaps the range to that full
+  calendar month and highlights the 1M preset. Default range on load: the
+  last month.
+- A category filter and a sort-by (date/amount) control, both scoped to the
+  transaction table only.
+- A period-over-period metric (selected range vs. the immediately preceding
+  range of equal length), a category-breakdown donut chart, and a daily
+  spend-trend line chart — all three recompute whenever the date range
+  changes.
+- The filtered transaction table.
+
 ### Database (`migrations/`)
 - `001_epic1.sql` — `transactions`, `processed_emails`, `flagged_emails`,
   `oauth_tokens`, `sync_logs`
 - `002_sender_filters.sql` — configurable sender allowlist (no CRUD API yet;
   rows are managed by hand via `psql`)
+- `003_add_is_transfer.sql` — `transactions.is_transfer` boolean flag
 
 ### Tests (`app/tests/`)
 Unit tests for `security.py` and `store.py`, run against a real database
@@ -137,6 +182,7 @@ Unit tests for `security.py` and `store.py`, run against a real database
 
 ### Prerequisites
 - Python 3.12+
+- Node.js 20+ (for the `frontend/` Vue app)
 - PostgreSQL running locally, with a database created (default expected name:
   `expense_tracker`)
 - A Google Cloud project with the Gmail API enabled and an OAuth 2.0 Client
@@ -176,6 +222,7 @@ Download the OAuth client's JSON from Google Cloud Console and save it as
 ```bash
 psql "$DATABASE_URL" -f migrations/001_epic1.sql
 psql "$DATABASE_URL" -f migrations/002_sender_filters.sql
+psql "$DATABASE_URL" -f migrations/003_add_is_transfer.sql
 ```
 
 ### 6. Add at least one sender to `sender_filters`
@@ -200,6 +247,19 @@ Then:
 2. Trigger a sync: `curl -X POST "http://localhost:8080/sync?newer_than=90d"`
 3. Check status: `curl http://localhost:8080/auth/google/status`
 4. Extract transaction data: `curl -X POST "http://localhost:8080/extract?limit=50"`
+
+## Running the dashboard
+
+The dashboard is a separate process from the API server — run it alongside
+`uvicorn`, not instead of it:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open the URL Vite prints (default `http://localhost:5173`). The dev server
+proxies `/api` requests to the FastAPI backend on `http://localhost:8080`
+(see `frontend/vite.config.ts`), so `uvicorn` must be running too.
 
 ## Running tests
 

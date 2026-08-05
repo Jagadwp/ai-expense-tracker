@@ -4,9 +4,12 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from datetime import date
+
 import psycopg
 from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException, Response, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from app import gmail_auth
@@ -61,6 +64,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="expense-tracker-ai", lifespan=lifespan)
+
+# Dev-mode Vite server runs on a different origin (localhost:5173) than
+# FastAPI (localhost:8080); the browser enforces CORS between them.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -211,3 +223,57 @@ async def extract(limit: int | None = 50):
         "flagged_low_confidence": flagged_low_confidence,
         "failed": failed,
     }
+
+
+@app.get("/api/transactions")
+async def api_transactions(
+    date_from: date,
+    date_to: date,
+    category: str | None = None,
+    sort_by: str = "date",
+    include_transfers: bool = True,
+):
+    """List extracted transactions within [date_from, date_to] for the
+    dashboard (M5)."""
+    return await app.state.store.list_transactions(
+        date_from=date_from,
+        date_to=date_to,
+        category=category,
+        sort_by=sort_by,
+        include_transfers=include_transfers,
+    )
+
+
+@app.get("/api/categories")
+async def api_categories():
+    """Distinct categories present in extracted transactions, for the
+    dashboard's category filter."""
+    return await app.state.store.list_categories()
+
+
+@app.get("/api/available-months")
+async def api_available_months():
+    """Months ("YYYY-MM") that have at least one extracted transaction, for
+    the dashboard's month picker."""
+    return await app.state.store.list_available_months()
+
+
+@app.get("/api/summary/category-totals")
+async def api_category_totals(date_from: date, date_to: date):
+    """Total spend per category within [date_from, date_to], excluding
+    transfers."""
+    return await app.state.store.category_totals(date_from=date_from, date_to=date_to)
+
+
+@app.get("/api/summary/trend")
+async def api_spend_trend(date_from: date, date_to: date):
+    """Total spend per day within [date_from, date_to], excluding
+    transfers."""
+    return await app.state.store.spend_trend(date_from=date_from, date_to=date_to)
+
+
+@app.get("/api/summary/period-comparison")
+async def api_period_comparison(date_from: date, date_to: date):
+    """Total spend in [date_from, date_to] vs the immediately preceding
+    period of the same length, excluding transfers."""
+    return await app.state.store.period_comparison(date_from=date_from, date_to=date_to)

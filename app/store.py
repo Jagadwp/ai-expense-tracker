@@ -9,7 +9,7 @@ at the call site.
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import psycopg
 
@@ -327,3 +327,161 @@ class Store:
                 (status, emails_fetched, emails_new, emails_skipped, error_message, sync_log_id),
             )
         await self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Dashboard read queries (M5) — filters and aggregates for the Vue SPA,
+    # served over the /api/* routes in app.main.
+    # ------------------------------------------------------------------
+
+    async def list_transactions(
+        self,
+        date_from: date,
+        date_to: date,
+        category: str | None = None,
+        sort_by: str = "date",
+        include_transfers: bool = True,
+    ) -> list[dict]:
+        """Return extracted transactions within [date_from, date_to]
+        (inclusive), optionally filtered by category, sorted by date or
+        amount (descending).
+
+        Transfers (is_transfer=true) are included by default so they stay
+        visible for audit — they're excluded from spend totals elsewhere in
+        this module, not hidden from the list."""
+        order_column = "amount" if sort_by == "amount" else "date"
+
+        conditions = ["extracted_at IS NOT NULL", "date >= %s", "date < %s"]
+        params: list = [date_from, date_to + timedelta(days=1)]
+        if category:
+            conditions.append("category = %s")
+            params.append(category)
+        if not include_transfers:
+            conditions.append("is_transfer = false")
+
+        query = f"""
+            SELECT date, merchant, category, amount, payment_method, is_transfer
+            FROM transactions
+            WHERE {" AND ".join(conditions)}
+            ORDER BY {order_column} DESC
+        """
+        async with self._conn.cursor() as cur:
+            await cur.execute(query, params)
+            rows = await cur.fetchall()
+
+        return [
+            {
+                "date": row[0].isoformat() if row[0] else None,
+                "merchant": row[1],
+                "category": row[2],
+                "amount": float(row[3]) if row[3] is not None else None,
+                "payment_method": row[4],
+                "is_transfer": row[5],
+            }
+            for row in rows
+        ]
+
+    async def list_categories(self) -> list[str]:
+        """Return the distinct categories present in extracted transactions,
+        for populating a filter dropdown. Not scoped to a date range — the
+        category set is small and effectively fixed, so showing all of them
+        regardless of the selected window is more useful than an empty or
+        shifting list."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DISTINCT category FROM transactions
+                WHERE extracted_at IS NOT NULL AND category IS NOT NULL
+                ORDER BY category
+                """
+            )
+            rows = await cur.fetchall()
+        return [row[0] for row in rows]
+
+    async def list_available_months(self) -> list[str]:
+        """Return the distinct months ("YYYY-MM", most recent first) that
+        have at least one extracted transaction — bounds the dashboard's
+        month picker to months that actually have data."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT DISTINCT to_char(date, 'YYYY-MM') AS month
+                FROM transactions
+                WHERE extracted_at IS NOT NULL AND date IS NOT NULL
+                ORDER BY month DESC
+                """
+            )
+            rows = await cur.fetchall()
+        return [row[0] for row in rows]
+
+    async def category_totals(self, date_from: date, date_to: date) -> list[dict]:
+        """Return total spend per category within [date_from, date_to]
+        (inclusive).
+
+        Excludes is_transfer=true rows — fund movements aren't real spend."""
+        query = """
+            SELECT category, SUM(amount) AS total
+            FROM transactions
+            WHERE extracted_at IS NOT NULL AND is_transfer = false
+              AND date >= %s AND date < %s
+            GROUP BY category
+            ORDER BY total DESC
+        """
+        async with self._conn.cursor() as cur:
+            await cur.execute(query, (date_from, date_to + timedelta(days=1)))
+            rows = await cur.fetchall()
+
+        return [{"category": row[0], "total": float(row[1])} for row in rows]
+
+    async def spend_trend(self, date_from: date, date_to: date) -> list[dict]:
+        """Return total spend per day within [date_from, date_to]
+        (inclusive), for the trend chart.
+
+        Excludes is_transfer=true rows — fund movements aren't real spend."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT date_trunc('day', date) AS day, SUM(amount) AS total
+                FROM transactions
+                WHERE extracted_at IS NOT NULL AND is_transfer = false
+                  AND date >= %s AND date < %s
+                GROUP BY day
+                ORDER BY day
+                """,
+                (date_from, date_to + timedelta(days=1)),
+            )
+            rows = await cur.fetchall()
+
+        return [{"date": row[0].date().isoformat(), "total": float(row[1])} for row in rows]
+
+    async def period_comparison(self, date_from: date, date_to: date) -> dict:
+        """Return the total spend in [date_from, date_to] (inclusive) and in
+        the immediately preceding period of the same length, for a
+        period-over-period comparison.
+
+        Excludes is_transfer=true rows — fund movements aren't real spend."""
+        duration = (date_to - date_from) + timedelta(days=1)
+        previous_to_exclusive = date_from
+        previous_from = date_from - duration
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT
+                    SUM(amount) FILTER (WHERE date >= %(from)s AND date < %(to)s) AS current_total,
+                    SUM(amount) FILTER (WHERE date >= %(prev_from)s AND date < %(prev_to)s) AS previous_total
+                FROM transactions
+                WHERE extracted_at IS NOT NULL AND is_transfer = false
+                """,
+                {
+                    "from": date_from,
+                    "to": date_to + timedelta(days=1),
+                    "prev_from": previous_from,
+                    "prev_to": previous_to_exclusive,
+                },
+            )
+            row = await cur.fetchone()
+
+        return {
+            "current_total": float(row[0]) if row[0] is not None else 0.0,
+            "previous_total": float(row[1]) if row[1] is not None else 0.0,
+        }
