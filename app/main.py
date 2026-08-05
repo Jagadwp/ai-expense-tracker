@@ -277,3 +277,18 @@ async def api_period_comparison(date_from: date, date_to: date):
     """Total spend in [date_from, date_to] vs the immediately preceding
     period of the same length, excluding transfers."""
     return await app.state.store.period_comparison(date_from=date_from, date_to=date_to)
+
+
+@app.get("/api/summary/category-period-comparison")
+async def api_category_period_comparison(date_from: date, date_to: date):
+    """Per-category breakdown of period-comparison: total spend in
+    [date_from, date_to] vs the immediately preceding period of the same
+    length, excluding transfers."""
+    return await app.state.store.category_period_comparison(date_from=date_from, date_to=date_to)
+
+
+@app.get("/api/summary/category-trend")
+async def api_category_trend(date_from: date, date_to: date):
+    """Total spend per day per category within [date_from, date_to], for a
+    multi-line trend chart, excluding transfers."""
+    return await app.state.store.category_trend(date_from=date_from, date_to=date_to)

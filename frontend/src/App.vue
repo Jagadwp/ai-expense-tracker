@@ -1,13 +1,32 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { fetchAvailableMonths, fetchCategories, fetchCategoryTotals, fetchPeriodComparison, fetchSpendTrend, fetchTransactions } from './api'
+import {
+  fetchAvailableMonths,
+  fetchCategories,
+  fetchCategoryPeriodComparison,
+  fetchCategoryTotals,
+  fetchCategoryTrend,
+  fetchPeriodComparison,
+  fetchSpendTrend,
+  fetchTransactions,
+} from './api'
 import { DEFAULT_PRESET, PRESETS, presetRange } from './dateRange'
 import FilterBar from './components/FilterBar.vue'
 import PeriodComparisonMetrics from './components/PeriodComparisonMetrics.vue'
+import CategoryPeriodMetrics from './components/CategoryPeriodMetrics.vue'
 import CategoryChart from './components/CategoryChart.vue'
 import TrendChart from './components/TrendChart.vue'
+import CategoryTrendChart from './components/CategoryTrendChart.vue'
 import TransactionTable from './components/TransactionTable.vue'
-import type { CategoryTotal, Filters, PeriodComparison, Transaction, TrendPoint } from './types'
+import type {
+  CategoryPeriodComparison,
+  CategoryTotal,
+  CategoryTrendPoint,
+  Filters,
+  PeriodComparison,
+  Transaction,
+  TrendPoint,
+} from './types'
 
 const defaultRange = presetRange(PRESETS.find((p) => p.label === DEFAULT_PRESET)!, new Date())
 
@@ -25,20 +44,26 @@ const transactions = ref<Transaction[]>([])
 const categoryTotals = ref<CategoryTotal[]>([])
 const spendTrend = ref<TrendPoint[]>([])
 const comparison = ref<PeriodComparison>({ current_total: 0, previous_total: 0 })
+const categoryComparisons = ref<CategoryPeriodComparison[]>([])
+const categoryTrend = ref<CategoryTrendPoint[]>([])
 
 const loadError = ref<string | null>(null)
 
 async function loadRangeDependent() {
-  const [tx, totals, trend, comp] = await Promise.all([
+  const [tx, totals, trend, comp, catComp, catTrend] = await Promise.all([
     fetchTransactions(filters.value),
     fetchCategoryTotals(filters.value),
     fetchSpendTrend(filters.value),
     fetchPeriodComparison(filters.value),
+    fetchCategoryPeriodComparison(filters.value),
+    fetchCategoryTrend(filters.value),
   ])
   transactions.value = tx
   categoryTotals.value = totals
   spendTrend.value = trend
   comparison.value = comp
+  categoryComparisons.value = catComp
+  categoryTrend.value = catTrend
 }
 
 async function loadAll() {
@@ -83,10 +108,14 @@ const hasError = computed(() => loadError.value !== null)
       <template v-else>
         <PeriodComparisonMetrics :comparison="comparison" />
 
+        <CategoryPeriodMetrics :comparisons="categoryComparisons" />
+
         <div class="charts">
           <CategoryChart :totals="categoryTotals" />
           <TrendChart :trend="spendTrend" />
         </div>
+
+        <CategoryTrendChart :trend="categoryTrend" />
 
         <TransactionTable :transactions="transactions" />
       </template>

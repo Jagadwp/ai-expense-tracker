@@ -1,4 +1,12 @@
-import type { CategoryTotal, Filters, PeriodComparison, Transaction, TrendPoint } from './types'
+import type {
+  CategoryPeriodComparison,
+  CategoryTotal,
+  CategoryTrendPoint,
+  Filters,
+  PeriodComparison,
+  Transaction,
+  TrendPoint,
+} from './types'
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path)
@@ -38,4 +46,14 @@ export function fetchSpendTrend(range: Pick<Filters, 'dateFrom' | 'dateTo'>): Pr
 
 export function fetchPeriodComparison(range: Pick<Filters, 'dateFrom' | 'dateTo'>): Promise<PeriodComparison> {
   return getJson(`/api/summary/period-comparison?${rangeParams(range)}`)
+}
+
+export function fetchCategoryPeriodComparison(
+  range: Pick<Filters, 'dateFrom' | 'dateTo'>,
+): Promise<CategoryPeriodComparison[]> {
+  return getJson(`/api/summary/category-period-comparison?${rangeParams(range)}`)
+}
+
+export function fetchCategoryTrend(range: Pick<Filters, 'dateFrom' | 'dateTo'>): Promise<CategoryTrendPoint[]> {
+  return getJson(`/api/summary/category-trend?${rangeParams(range)}`)
 }

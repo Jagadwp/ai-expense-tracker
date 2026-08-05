@@ -485,3 +485,71 @@ class Store:
             "current_total": float(row[0]) if row[0] is not None else 0.0,
             "previous_total": float(row[1]) if row[1] is not None else 0.0,
         }
+
+    async def category_period_comparison(self, date_from: date, date_to: date) -> list[dict]:
+        """Return, per category, the total spend in [date_from, date_to]
+        (inclusive) and in the immediately preceding period of the same
+        length — the per-category breakdown of period_comparison().
+
+        Includes a category if it has spend in either period (a category
+        with only previous-period spend still needs to show a drop to
+        zero). Excludes is_transfer=true rows."""
+        duration = (date_to - date_from) + timedelta(days=1)
+        previous_to_exclusive = date_from
+        previous_from = date_from - duration
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT
+                    category,
+                    SUM(amount) FILTER (WHERE date >= %(from)s AND date < %(to)s) AS current_total,
+                    SUM(amount) FILTER (WHERE date >= %(prev_from)s AND date < %(prev_to)s) AS previous_total
+                FROM transactions
+                WHERE extracted_at IS NOT NULL AND is_transfer = false AND category IS NOT NULL
+                  AND date >= %(prev_from)s AND date < %(to)s
+                GROUP BY category
+                ORDER BY current_total DESC NULLS LAST
+                """,
+                {
+                    "from": date_from,
+                    "to": date_to + timedelta(days=1),
+                    "prev_from": previous_from,
+                    "prev_to": previous_to_exclusive,
+                },
+            )
+            rows = await cur.fetchall()
+
+        return [
+            {
+                "category": row[0],
+                "current_total": float(row[1]) if row[1] is not None else 0.0,
+                "previous_total": float(row[2]) if row[2] is not None else 0.0,
+            }
+            for row in rows
+        ]
+
+    async def category_trend(self, date_from: date, date_to: date) -> list[dict]:
+        """Return total spend per day per category within [date_from,
+        date_to] (inclusive), for a multi-line trend chart (one line per
+        category).
+
+        Excludes is_transfer=true rows — fund movements aren't real spend."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT date_trunc('day', date) AS day, category, SUM(amount) AS total
+                FROM transactions
+                WHERE extracted_at IS NOT NULL AND is_transfer = false AND category IS NOT NULL
+                  AND date >= %s AND date < %s
+                GROUP BY day, category
+                ORDER BY day
+                """,
+                (date_from, date_to + timedelta(days=1)),
+            )
+            rows = await cur.fetchall()
+
+        return [
+            {"date": row[0].date().isoformat(), "category": row[1], "total": float(row[2])}
+            for row in rows
+        ]

@@ -22,6 +22,18 @@ export interface PeriodComparison {
   previous_total: number
 }
 
+export interface CategoryPeriodComparison {
+  category: string
+  current_total: number
+  previous_total: number
+}
+
+export interface CategoryTrendPoint {
+  date: string
+  category: string
+  total: number
+}
+
 export interface Filters {
   category: string | null
   dateFrom: string

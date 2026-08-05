@@ -106,6 +106,8 @@ batch.
 | `GET /api/summary/category-totals?date_from=&date_to=` | Total spend per category in range, excluding transfers |
 | `GET /api/summary/trend?date_from=&date_to=` | Total spend per day in range, excluding transfers |
 | `GET /api/summary/period-comparison?date_from=&date_to=` | Total spend in range vs the immediately preceding period of the same length, excluding transfers |
+| `GET /api/summary/category-period-comparison?date_from=&date_to=` | Per-category breakdown of `period-comparison`, excluding transfers |
+| `GET /api/summary/category-trend?date_from=&date_to=` | Total spend per day per category in range, for the multi-line trend chart, excluding transfers |
 
 The FastAPI `lifespan` also starts the scheduler and the IMAP IDLE listener,
 so a single `uvicorn app.main:app` process runs the HTTP server, the
@@ -145,12 +147,13 @@ them for audit.
 
 ### Dashboard (M5) — Vue SPA + REST API
 Read-only queries (`list_transactions`, `list_available_months`,
-`category_totals`, `spend_trend`, `period_comparison`) live on `Store`
-alongside the rest of the app's database access, and are exposed over a
-REST API (see the routes table below) instead of being queried directly
-from the dashboard process. Every query takes an explicit
-`date_from`/`date_to` range — there is no month-string filter. All spend
-aggregates exclude `is_transfer = true` rows.
+`category_totals`, `spend_trend`, `period_comparison`,
+`category_period_comparison`, `category_trend`) live on `Store` alongside
+the rest of the app's database access, and are exposed over a REST API
+(see the routes table below) instead of being queried directly from the
+dashboard process. Every query takes an explicit `date_from`/`date_to`
+range — there is no month-string filter. All spend aggregates exclude
+`is_transfer = true` rows.
 
 `frontend/` (Vue 3 + Vite, plain CSS — light/minimalist theme) consumes that
 API:
@@ -162,9 +165,10 @@ API:
 - A category filter and a sort-by (date/amount) control, both scoped to the
   transaction table only.
 - A period-over-period metric (selected range vs. the immediately preceding
-  range of equal length), a category-breakdown donut chart, and a daily
-  spend-trend line chart — all three recompute whenever the date range
-  changes.
+  range of equal length), broken out overall and per category, a
+  category-breakdown donut chart, a daily spend-trend line chart, and a
+  daily spend-trend line chart per category (one line per category) — all
+  recompute whenever the date range changes.
 - The filtered transaction table.
 
 ### Database (`migrations/`)
