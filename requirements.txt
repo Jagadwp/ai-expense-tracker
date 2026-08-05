@@ -14,6 +14,12 @@ google-auth==2.37.0
 google-auth-oauthlib==1.2.1
 google-api-python-client==2.157.0
 
+# --- IMAP IDLE (real-time new-email detection) ---
+IMAPClient==3.0.1
+
+# --- Scheduled sync ---
+APScheduler==3.11.0
+
 # --- Encryption (AES-256-GCM for OAuth tokens) ---
 cryptography==44.0.0
 

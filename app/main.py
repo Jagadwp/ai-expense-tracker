@@ -1,5 +1,7 @@
 """FastAPI entry point for the expense-tracker application."""
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 import psycopg
@@ -8,15 +10,15 @@ from fastapi.responses import RedirectResponse
 
 from app import gmail_auth
 from app.config import get_settings
-from app.gmail_sync import GmailSyncer
+from app.imap_idle import ImapIdleListener
+from app.scheduler import create_scheduler
 from app.security import Encryptor
 from app.store import NotFoundError, Store
+from app.sync_runner import DEFAULT_USER_ID, NoGmailConnected, run_sync
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 settings = get_settings()
-
-# Single-user MVP: every stored token belongs to this fixed user id (matches
-# the oauth_tokens.user_id DEFAULT 'default' in the migration).
-DEFAULT_USER_ID = "default"
 
 
 @asynccontextmanager
@@ -26,9 +28,32 @@ async def lifespan(app: FastAPI):
     app.state.db_conn = await psycopg.AsyncConnection.connect(settings.database_url)
     app.state.store = Store(app.state.db_conn)
     app.state.encryptor = Encryptor(settings.encryption_key)
+
+    # Scheduled sync (US-02): background fallback, runs every 30 minutes
+    # regardless of whether the IMAP IDLE listener is working.
+    app.state.scheduler = create_scheduler(app.state.store, app.state.encryptor)
+    app.state.scheduler.start()
+
+    # IMAP IDLE listener (US-04): real-time trigger, only started if IMAP
+    # credentials are configured (they're optional until the user sets up
+    # an app password).
+    app.state.imap_listener = None
+    if settings.gmail_imap_user and settings.gmail_imap_app_password:
+        app.state.imap_listener = ImapIdleListener(
+            settings, app.state.store, app.state.encryptor, asyncio.get_running_loop()
+        )
+        app.state.imap_listener.start()
+    else:
+        logger.warning(
+            "imap idle: GMAIL_IMAP_USER/GMAIL_IMAP_APP_PASSWORD not set, listener disabled"
+        )
+
     try:
         yield
     finally:
+        if app.state.imap_listener is not None:
+            app.state.imap_listener.stop()
+        app.state.scheduler.shutdown(wait=False)
         await app.state.db_conn.close()
 
 
@@ -103,48 +128,8 @@ async def sync(newer_than: str = "7d"):
     """Manually trigger a Gmail sync: fetch, dedup, and ingest new
     transaction emails for the connected account."""
     try:
-        token = await app.state.store.get_token(DEFAULT_USER_ID)
-    except NotFoundError:
-        raise HTTPException(status_code=400, detail="no Gmail account connected")
-
-    token_json = app.state.encryptor.decrypt(token.encrypted_token)
-    credentials = gmail_auth.credentials_from_token_json(token_json)
-
-    if gmail_auth.refresh_if_expired(credentials):
-        refreshed_token_json = credentials.to_json().encode("utf-8")
-        encrypted_token = app.state.encryptor.encrypt(refreshed_token_json)
-        await app.state.store.save_token(
-            DEFAULT_USER_ID, encrypted_token, token.gmail_email
-        )
-
-    sync_log_id = await app.state.store.create_sync_log("manual")
-    syncer = GmailSyncer(app.state.store, credentials)
-
-    try:
-        emails_fetched, emails_new, emails_skipped = await syncer.sync(newer_than)
+        return await run_sync(app.state.store, app.state.encryptor, "manual", newer_than)
+    except NoGmailConnected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        await app.state.store.finish_sync_log(
-            sync_log_id,
-            status="failed",
-            emails_fetched=0,
-            emails_new=0,
-            emails_skipped=0,
-            error_message=str(exc),
-        )
         raise HTTPException(status_code=502, detail=f"sync failed: {exc}")
-
-    await app.state.store.finish_sync_log(
-        sync_log_id,
-        status="success",
-        emails_fetched=emails_fetched,
-        emails_new=emails_new,
-        emails_skipped=emails_skipped,
-    )
-    await app.state.store.touch_last_synced(DEFAULT_USER_ID)
-
-    return {
-        "sync_log_id": str(sync_log_id),
-        "emails_fetched": emails_fetched,
-        "emails_new": emails_new,
-        "emails_skipped": emails_skipped,
-    }
