@@ -1,0 +1,24 @@
+# Secrets & env
+.env
+*.env.local
+credentials.json
+token.json
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local planning docs (not shared in the repo)
+/document/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+preview.html

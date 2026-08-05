@@ -1,0 +1,22 @@
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# --- Config ---
+python-dotenv==1.0.1
+pydantic-settings==2.7.1
+
+# --- Database (PostgreSQL) ---
+psycopg[binary]==3.2.3
+
+# --- Google OAuth2 + Gmail API ---
+google-auth==2.37.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.157.0
+
+# --- Encryption (AES-256-GCM for OAuth tokens) ---
+cryptography==44.0.0
+
+# --- Testing ---
+pytest==8.4.2
+pytest-asyncio==0.25.2
