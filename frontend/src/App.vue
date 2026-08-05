@@ -18,6 +18,7 @@ import CategoryChart from './components/CategoryChart.vue'
 import TrendChart from './components/TrendChart.vue'
 import CategoryTrendChart from './components/CategoryTrendChart.vue'
 import TransactionTable from './components/TransactionTable.vue'
+import TransactionPreviewModal from './components/TransactionPreviewModal.vue'
 import type {
   CategoryPeriodComparison,
   CategoryTotal,
@@ -48,6 +49,11 @@ const categoryComparisons = ref<CategoryPeriodComparison[]>([])
 const categoryTrend = ref<CategoryTrendPoint[]>([])
 
 const loadError = ref<string | null>(null)
+const previewMessageId = ref<string | null>(null)
+
+async function onTransferUpdated() {
+  await loadRangeDependent()
+}
 
 async function loadRangeDependent() {
   const [tx, totals, trend, comp, catComp, catTrend] = await Promise.all([
@@ -117,9 +123,16 @@ const hasError = computed(() => loadError.value !== null)
 
         <CategoryTrendChart :trend="categoryTrend" />
 
-        <TransactionTable :transactions="transactions" />
+        <TransactionTable :transactions="transactions" @preview="(id) => (previewMessageId = id)" />
       </template>
     </main>
+
+    <TransactionPreviewModal
+      v-if="previewMessageId"
+      :message-id="previewMessageId"
+      @close="previewMessageId = null"
+      @transfer-updated="onTransferUpdated"
+    />
   </div>
 </template>
 

@@ -359,7 +359,7 @@ class Store:
             conditions.append("is_transfer = false")
 
         query = f"""
-            SELECT date, merchant, category, amount, payment_method, is_transfer
+            SELECT message_id, date, merchant, category, amount, payment_method, is_transfer
             FROM transactions
             WHERE {" AND ".join(conditions)}
             ORDER BY {order_column} DESC
@@ -370,15 +370,58 @@ class Store:
 
         return [
             {
-                "date": row[0].isoformat() if row[0] else None,
-                "merchant": row[1],
-                "category": row[2],
-                "amount": float(row[3]) if row[3] is not None else None,
-                "payment_method": row[4],
-                "is_transfer": row[5],
+                "message_id": row[0],
+                "date": row[1].isoformat() if row[1] else None,
+                "merchant": row[2],
+                "category": row[3],
+                "amount": float(row[4]) if row[4] is not None else None,
+                "payment_method": row[5],
+                "is_transfer": row[6],
             }
             for row in rows
         ]
+
+    async def get_transaction_detail(self, message_id: str) -> dict | None:
+        """Return the full record (raw email fields + extracted fields) for
+        one transaction, for the dashboard's email-preview modal. Returns
+        None if no transaction has this message_id."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT message_id, raw_subject, raw_from, raw_body, date, merchant,
+                       category, amount, payment_method, is_transfer
+                FROM transactions
+                WHERE message_id = %s
+                """,
+                (message_id,),
+            )
+            row = await cur.fetchone()
+
+        if row is None:
+            return None
+
+        return {
+            "message_id": row[0],
+            "raw_subject": row[1],
+            "raw_from": row[2],
+            "raw_body": row[3],
+            "date": row[4].isoformat() if row[4] else None,
+            "merchant": row[5],
+            "category": row[6],
+            "amount": float(row[7]) if row[7] is not None else None,
+            "payment_method": row[8],
+            "is_transfer": row[9],
+        }
+
+    async def set_is_transfer(self, message_id: str, is_transfer: bool) -> None:
+        """Manually flag (or unflag) a transaction as a fund transfer, from
+        the dashboard's email-preview modal."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE transactions SET is_transfer = %s WHERE message_id = %s",
+                (is_transfer, message_id),
+            )
+        await self._conn.commit()
 
     async def list_categories(self) -> list[str]:
         """Return the distinct categories present in extracted transactions,

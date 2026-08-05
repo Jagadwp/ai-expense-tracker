@@ -1,10 +1,17 @@
 export interface Transaction {
+  message_id: string
   date: string | null
   merchant: string | null
   category: string | null
   amount: number | null
   payment_method: string | null
   is_transfer: boolean
+}
+
+export interface TransactionDetail extends Transaction {
+  raw_subject: string | null
+  raw_from: string | null
+  raw_body: string | null
 }
 
 export interface CategoryTotal {

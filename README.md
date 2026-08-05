@@ -101,6 +101,8 @@ batch.
 | `POST /sync?newer_than=7d` | Manually trigger a sync |
 | `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`) |
 | `GET /api/transactions?date_from=&date_to=` | List extracted transactions in range (filters: `category`, `sort_by`, `include_transfers`) |
+| `GET /api/transactions/{message_id}` | Full record (raw email fields + extracted fields) for one transaction, for the email-preview modal |
+| `PATCH /api/transactions/{message_id}/is-transfer` | Manually flag/unflag a transaction as a fund transfer, from the email-preview modal |
 | `GET /api/categories` | Distinct categories present in extracted transactions |
 | `GET /api/available-months` | Months (`YYYY-MM`) with at least one extracted transaction, for the "by month" shortcut |
 | `GET /api/summary/category-totals?date_from=&date_to=` | Total spend per category in range, excluding transfers |
@@ -148,12 +150,13 @@ them for audit.
 ### Dashboard (M5) — Vue SPA + REST API
 Read-only queries (`list_transactions`, `list_available_months`,
 `category_totals`, `spend_trend`, `period_comparison`,
-`category_period_comparison`, `category_trend`) live on `Store` alongside
-the rest of the app's database access, and are exposed over a REST API
-(see the routes table below) instead of being queried directly from the
-dashboard process. Every query takes an explicit `date_from`/`date_to`
-range — there is no month-string filter. All spend aggregates exclude
-`is_transfer = true` rows.
+`category_period_comparison`, `category_trend`, `get_transaction_detail`)
+and one write (`set_is_transfer`) live on `Store` alongside the rest of the
+app's database access, and are exposed over a REST API (see the routes
+table below) instead of being queried directly from the dashboard process.
+Every range query takes an explicit `date_from`/`date_to` range — there is
+no month-string filter. All spend aggregates exclude `is_transfer = true`
+rows.
 
 `frontend/` (Vue 3 + Vite, plain CSS — light/minimalist theme) consumes that
 API:
@@ -169,7 +172,13 @@ API:
   category-breakdown donut chart, a daily spend-trend line chart, and a
   daily spend-trend line chart per category (one line per category) — all
   recompute whenever the date range changes.
-- The filtered transaction table.
+- The filtered transaction table, with the message ID and a copy-to-clipboard
+  button per row. Clicking a row opens an email-preview modal: the extracted
+  fields on the left, the original raw email HTML rendered in a sandboxed
+  `<iframe>` (no scripts, no same-origin access — the email body is
+  untrusted content) on the right, and a "mark/unmark as transfer" action
+  that PATCHes `is_transfer` and refreshes the whole dashboard (every spend
+  aggregate depends on that flag).
 
 ### Database (`migrations/`)
 - `001_epic1.sql` — `transactions`, `processed_emails`, `flagged_emails`,

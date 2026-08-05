@@ -5,6 +5,7 @@ import type {
   Filters,
   PeriodComparison,
   Transaction,
+  TransactionDetail,
   TrendPoint,
 } from './types'
 
@@ -56,4 +57,19 @@ export function fetchCategoryPeriodComparison(
 
 export function fetchCategoryTrend(range: Pick<Filters, 'dateFrom' | 'dateTo'>): Promise<CategoryTrendPoint[]> {
   return getJson(`/api/summary/category-trend?${rangeParams(range)}`)
+}
+
+export function fetchTransactionDetail(messageId: string): Promise<TransactionDetail> {
+  return getJson(`/api/transactions/${encodeURIComponent(messageId)}`)
+}
+
+export async function setIsTransfer(messageId: string, isTransfer: boolean): Promise<void> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(messageId)}/is-transfer`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_transfer: isTransfer }),
+  })
+  if (!res.ok) {
+    throw new Error(`mark-as-transfer failed: ${res.status}`)
+  }
 }

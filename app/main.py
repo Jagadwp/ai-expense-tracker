@@ -11,6 +11,7 @@ from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 from app import gmail_auth
 from app.config import get_settings
@@ -242,6 +243,31 @@ async def api_transactions(
         sort_by=sort_by,
         include_transfers=include_transfers,
     )
+
+
+@app.get("/api/transactions/{message_id}")
+async def api_transaction_detail(message_id: str):
+    """Full record (raw email fields + extracted fields) for one
+    transaction, for the dashboard's email-preview modal."""
+    detail = await app.state.store.get_transaction_detail(message_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="transaction not found")
+    return detail
+
+
+class SetTransferRequest(BaseModel):
+    is_transfer: bool
+
+
+@app.patch("/api/transactions/{message_id}/is-transfer")
+async def api_set_is_transfer(message_id: str, body: SetTransferRequest):
+    """Manually flag (or unflag) a transaction as a fund transfer, from the
+    dashboard's email-preview modal."""
+    detail = await app.state.store.get_transaction_detail(message_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="transaction not found")
+    await app.state.store.set_is_transfer(message_id, body.is_transfer)
+    return {"status": "ok"}
 
 
 @app.get("/api/categories")
