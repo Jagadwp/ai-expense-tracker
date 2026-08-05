@@ -5,11 +5,13 @@ import logging
 from contextlib import asynccontextmanager
 
 import psycopg
+from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.responses import RedirectResponse
 
 from app import gmail_auth
 from app.config import get_settings
+from app.extraction import CONFIDENCE_THRESHOLD, extract_transaction
 from app.imap_idle import ImapIdleListener
 from app.scheduler import create_scheduler
 from app.security import Encryptor
@@ -28,6 +30,7 @@ async def lifespan(app: FastAPI):
     app.state.db_conn = await psycopg.AsyncConnection.connect(settings.database_url)
     app.state.store = Store(app.state.db_conn)
     app.state.encryptor = Encryptor(settings.encryption_key)
+    app.state.anthropic = Anthropic(api_key=settings.anthropic_api_key)
 
     # Scheduled sync (US-02): background fallback, runs every 30 minutes
     # regardless of whether the IMAP IDLE listener is working.
@@ -133,3 +136,73 @@ async def sync(newer_than: str = "7d"):
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"sync failed: {exc}")
+
+
+@app.post("/extract")
+async def extract(limit: int | None = 50):
+    """Run LLM extraction (M4) over raw transactions not yet extracted.
+
+    Defaults to a limit of 50: this endpoint blocks the HTTP request for the
+    whole batch (each email is a sequential LLM call, ~1-2s), so an unbounded
+    call risks a client/proxy timeout on a large backlog. Pass a smaller
+    limit for faster responses, or a larger one (or None) if you know the
+    caller can wait.
+
+    One email's failure is recorded in flagged_emails and does not stop the
+    rest of the batch (FR-06).
+    """
+    candidates = await app.state.store.get_unextracted_transactions(limit=limit)
+
+    extracted = 0
+    skipped_non_transaction = 0
+    flagged_low_confidence = 0
+    failed = 0
+
+    for tx in candidates:
+        try:
+            result = extract_transaction(
+                app.state.anthropic, tx.raw_subject, tx.raw_from, tx.raw_body
+            )
+        except Exception as exc:
+            logger.exception("extraction failed for message %s", tx.message_id)
+            await app.state.store.flag_email(
+                message_id=tx.message_id,
+                raw_body=tx.raw_body,
+                error_message=str(exc),
+                flagged_reason="extraction_error",
+            )
+            failed += 1
+            continue
+
+        if not result.is_transaction:
+            await app.state.store.delete_non_transaction(tx.message_id)
+            skipped_non_transaction += 1
+        elif result.confidence < CONFIDENCE_THRESHOLD:
+            await app.state.store.set_low_confidence(tx.message_id, result.confidence)
+            await app.state.store.flag_email(
+                message_id=tx.message_id,
+                raw_body=tx.raw_body,
+                error_message=f"low confidence: {result.model_dump_json()}",
+                flagged_reason="low_confidence",
+            )
+            flagged_low_confidence += 1
+        else:
+            await app.state.store.apply_extraction(
+                message_id=tx.message_id,
+                date=result.date,
+                merchant=result.merchant,
+                amount=result.amount,
+                currency=result.currency,
+                category=result.category,
+                payment_method=result.payment_method,
+                confidence=result.confidence,
+            )
+            extracted += 1
+
+    return {
+        "candidates": len(candidates),
+        "extracted": extracted,
+        "skipped_non_transaction": skipped_non_transaction,
+        "flagged_low_confidence": flagged_low_confidence,
+        "failed": failed,
+    }

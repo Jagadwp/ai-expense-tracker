@@ -179,6 +179,89 @@ class Store:
         await self._conn.commit()
 
     # ------------------------------------------------------------------
+    # LLM extraction (M4) — fills in the extraction columns left NULL by
+    # save_raw_transaction, or removes/flags the row when extraction
+    # determines it isn't a usable transaction.
+    # ------------------------------------------------------------------
+
+    async def get_unextracted_transactions(
+        self, limit: int | None = None
+    ) -> list[RawTransaction]:
+        """Return raw transactions not yet extracted, excluding any already
+        flagged for review (so a flagged email isn't retried every run)."""
+        query = """
+            SELECT message_id, raw_subject, raw_from, raw_body
+            FROM transactions
+            WHERE extracted_at IS NULL
+              AND message_id NOT IN (SELECT message_id FROM flagged_emails)
+        """
+        params: tuple = ()
+        if limit is not None:
+            query += " LIMIT %s"
+            params = (limit,)
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(query, params)
+            rows = await cur.fetchall()
+        return [
+            RawTransaction(
+                message_id=row[0], raw_subject=row[1], raw_from=row[2], raw_body=row[3]
+            )
+            for row in rows
+        ]
+
+    async def apply_extraction(
+        self,
+        message_id: str,
+        date: str | None,
+        merchant: str | None,
+        amount: float | None,
+        currency: str,
+        category: str | None,
+        payment_method: str | None,
+        confidence: float,
+    ) -> None:
+        """Write a confident extraction result into transactions and mark it
+        as extracted (excludes it from future get_unextracted_transactions
+        calls)."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE transactions
+                SET date = %s, merchant = %s, amount = %s, currency = %s,
+                    category = %s, payment_method = %s, confidence = %s,
+                    extracted_at = now()
+                WHERE message_id = %s
+                """,
+                (date, merchant, amount, currency, category, payment_method, confidence, message_id),
+            )
+        await self._conn.commit()
+
+    async def set_low_confidence(self, message_id: str, confidence: float) -> None:
+        """Record only the confidence score for a low-confidence extraction.
+
+        The other extraction columns and extracted_at are left NULL — the
+        guessed values are never written into transactions until a human
+        reviews flagged_emails and applies them manually.
+        """
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE transactions SET confidence = %s WHERE message_id = %s",
+                (confidence, message_id),
+            )
+        await self._conn.commit()
+
+    async def delete_non_transaction(self, message_id: str) -> None:
+        """Remove a transactions row that extraction determined isn't a real
+        transaction (FR-09). Dedup is unaffected — processed_emails already
+        prevents this email from being fetched again."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                "DELETE FROM transactions WHERE message_id = %s", (message_id,)
+            )
+        await self._conn.commit()
+
+    # ------------------------------------------------------------------
     # Error bucket (flagged_emails) — one failed email must not stop the
     # pipeline (FR-06)
     # ------------------------------------------------------------------

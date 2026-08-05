@@ -10,15 +10,15 @@ surfaces it through a dashboard and a natural-language Q&A agent.
 
 ## Current status
 
-**Milestones M1 (Gmail OAuth) and M2 (email fetch + dedup) are implemented and
-tested end-to-end against a real Gmail account.**
+**Milestones M1 through M4 are implemented and tested end-to-end against a
+real Gmail account.**
 
 | Milestone | Status |
 |---|---|
 | M1 — Gmail OAuth (connect, encrypted token storage, disconnect) | ✅ Done |
 | M2 — Email fetch, dedup, raw ingestion | ✅ Done |
-| M3 — IMAP IDLE + scheduled sync | Not started |
-| M4 — LLM extraction | Not started |
+| M3 — IMAP IDLE + scheduled sync | ✅ Done |
+| M4 — LLM extraction (Claude Haiku 4.5) | ✅ Done |
 | M5 — Dashboard (Streamlit) | Not started |
 | M6 — Q&A agent (text-to-SQL) | Not started |
 | M7 — Alerts, deploy | Not started |
@@ -42,7 +42,9 @@ All SQL lives here, grouped by table:
 - `sender_filters` — `get_active_sender_filters`
 - `processed_emails` (dedup) — `is_processed`, `mark_processed`
 - `transactions` (raw fields) — `save_raw_transaction`
-- `flagged_emails` (errors) — `flag_email`
+- `transactions` (extraction, M4) — `get_unextracted_transactions`,
+  `apply_extraction`, `set_low_confidence`, `delete_non_transaction`
+- `flagged_emails` (errors / review queue) — `flag_email`
 - `sync_logs` — `create_sync_log`, `finish_sync_log`
 
 ### `app/gmail_auth.py` — Google OAuth2 flow
@@ -57,6 +59,30 @@ queries Gmail, and for each message checks dedup, decodes the body
 A single email's failure is recorded in `flagged_emails` — it never stops the
 rest of the sync.
 
+### `app/sync_runner.py` — shared sync orchestration
+`run_sync()`: the common logic behind the manual `/sync` route, the scheduled
+job, and the IMAP IDLE trigger — get the stored token, refresh it if expired,
+run `GmailSyncer`, and record the result to `sync_logs`.
+
+### `app/scheduler.py` — 30-minute scheduled sync (M3)
+`AsyncIOScheduler` job that runs the same sync pipeline every 30 minutes, as a
+fallback in case the real-time IMAP listener misses something or its
+connection drops.
+
+### `app/imap_idle.py` — real-time new-email detection (M3)
+`ImapIdleListener`: runs a blocking IMAP IDLE loop in a background thread
+(since it can't run on the app's asyncio event loop), and triggers a sync via
+`asyncio.run_coroutine_threadsafe` whenever new mail arrives. Auto-reconnects
+on any connection error.
+
+### `app/extraction.py` — LLM extraction (M4)
+`extract_transaction()`: sends one email's subject/sender/body to
+**Claude Haiku 4.5** via `client.messages.parse()` with a Pydantic schema
+(`ExtractionResult`) for structured output — no thinking, no `effort` (a
+high-volume, low-complexity task; Haiku 4.5 doesn't support `effort` anyway).
+The system prompt is prompt-cached since it's identical across the whole
+batch.
+
 ### `app/main.py` — API routes
 
 | Method & path | Purpose |
@@ -67,6 +93,35 @@ rest of the sync.
 | `GET /auth/google/status` | Report whether Gmail is connected |
 | `DELETE /auth/google` | Disconnect the Gmail account |
 | `POST /sync?newer_than=7d` | Manually trigger a sync |
+| `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`) |
+
+The FastAPI `lifespan` also starts the scheduler and the IMAP IDLE listener,
+so a single `uvicorn app.main:app` process runs the HTTP server, the
+30-minute scheduled sync, and the real-time listener together — no separate
+worker process needed.
+
+### Extraction decision logic (M4)
+For each unextracted email, Claude returns `is_transaction`, the extracted
+fields, and a `confidence` score:
+- `is_transaction: false` (e.g. a promo email) → the raw row is deleted
+  (FR-09) — it was never a real transaction.
+- `confidence` below `0.7` → only the `confidence` column is written; the
+  other fields stay `NULL` and the row is recorded in `flagged_emails` for
+  manual review. This is deliberately fail-safe: a low-confidence guess never
+  reaches a spend total until a human confirms it.
+- `confidence` ≥ `0.7` → all extracted fields are written and `extracted_at`
+  is set.
+
+To manually approve a flagged, low-confidence transaction after reviewing
+`flagged_emails.raw_body`:
+```sql
+UPDATE transactions
+SET date = '...', merchant = '...', amount = ..., category = '...',
+    payment_method = '...', confidence = 1.000, extracted_at = now()
+WHERE message_id = '...';
+
+DELETE FROM flagged_emails WHERE message_id = '...';
+```
 
 ### Database (`migrations/`)
 - `001_epic1.sql` — `transactions`, `processed_emails`, `flagged_emails`,
@@ -106,6 +161,11 @@ Fill in `DATABASE_URL`, and generate `ENCRYPTION_KEY` / `SESSION_SECRET` with:
 ```bash
 openssl rand -base64 32
 ```
+Also set `ANTHROPIC_API_KEY` (from [console.anthropic.com](https://console.anthropic.com))
+for extraction, and — optionally, for the IMAP IDLE listener —
+`GMAIL_IMAP_USER` and `GMAIL_IMAP_APP_PASSWORD` (a Google 2FA
+[app password](https://myaccount.google.com/apppasswords), not your normal
+password). The listener is skipped with a warning if these are unset.
 
 ### 4. Place your Google OAuth credentials
 Download the OAuth client's JSON from Google Cloud Console and save it as
@@ -139,6 +199,7 @@ Then:
    Google consent flow.
 2. Trigger a sync: `curl -X POST "http://localhost:8080/sync?newer_than=90d"`
 3. Check status: `curl http://localhost:8080/auth/google/status`
+4. Extract transaction data: `curl -X POST "http://localhost:8080/extract?limit=50"`
 
 ## Running tests
 

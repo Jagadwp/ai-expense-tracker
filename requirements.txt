@@ -23,6 +23,9 @@ APScheduler==3.11.0
 # --- Encryption (AES-256-GCM for OAuth tokens) ---
 cryptography==44.0.0
 
+# --- LLM extraction (M4) ---
+anthropic==0.120.2
+
 # --- Testing ---
 pytest==8.4.2
 pytest-asyncio==0.25.2

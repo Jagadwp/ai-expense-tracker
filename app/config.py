@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     gmail_imap_user: str = Field(default="", alias="GMAIL_IMAP_USER")
     gmail_imap_app_password: str = Field(default="", alias="GMAIL_IMAP_APP_PASSWORD")
 
+    # --- LLM extraction (M4) ---
+    anthropic_api_key: str = Field(alias="ANTHROPIC_API_KEY")
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
