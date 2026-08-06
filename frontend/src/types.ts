@@ -41,6 +41,18 @@ export interface CategoryTrendPoint {
   total: number
 }
 
+export interface QaAnswer {
+  answer: string
+  sql: string | null
+}
+
+export interface QaExchange {
+  question: string
+  answer: string | null
+  sql: string | null
+  error: string | null
+}
+
 export interface Filters {
   category: string | null
   dateFrom: string

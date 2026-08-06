@@ -10,8 +10,8 @@ surfaces it through a dashboard and a natural-language Q&A agent.
 
 ## Current status
 
-**Milestones M1 through M4 are implemented and tested end-to-end against a
-real Gmail account. M5 (dashboard) is in progress — see below.**
+**Milestones M1 through M6 are implemented and tested end-to-end against a
+real Gmail account.**
 
 | Milestone | Status |
 |---|---|
@@ -19,8 +19,8 @@ real Gmail account. M5 (dashboard) is in progress — see below.**
 | M2 — Email fetch, dedup, raw ingestion | ✅ Done |
 | M3 — IMAP IDLE + scheduled sync | ✅ Done |
 | M4 — LLM extraction (Claude Haiku 4.5) | ✅ Done |
-| M5 — Dashboard (Vue SPA + REST API) | In progress |
-| M6 — Q&A agent (text-to-SQL) | Not started |
+| M5 — Dashboard (Vue SPA + REST API) | ✅ Done |
+| M6 — Q&A agent (text-to-SQL, Claude Sonnet 5) | Agent working; eval set not built yet |
 | M7 — Alerts, deploy | Not started |
 
 **M5 was originally built with Streamlit, then swapped to a Vue 3 SPA** after
@@ -110,6 +110,7 @@ batch.
 | `GET /api/summary/period-comparison?date_from=&date_to=` | Total spend in range vs the immediately preceding period of the same length, excluding transfers |
 | `GET /api/summary/category-period-comparison?date_from=&date_to=` | Per-category breakdown of `period-comparison`, excluding transfers |
 | `GET /api/summary/category-trend?date_from=&date_to=` | Total spend per day per category in range, for the multi-line trend chart, excluding transfers |
+| `POST /api/qa/ask` | Ask a natural-language question about expense data (M6, text-to-SQL) — body `{"question": "..."}`, returns `{"answer": "...", "sql": "..."}` |
 
 The FastAPI `lifespan` also starts the scheduler and the IMAP IDLE listener,
 so a single `uvicorn app.main:app` process runs the HTTP server, the
@@ -179,6 +180,31 @@ API:
   untrusted content) on the right, and a "mark/unmark as transfer" action
   that PATCHes `is_transfer` and refreshes the whole dashboard (every spend
   aggregate depends on that flag).
+
+### `app/qa_agent.py` — Q&A agent (M6, text-to-SQL)
+`POST /api/qa/ask` lets the dashboard ask a natural-language question about
+expense data. Two separate Claude Sonnet 5 calls, not one agentic loop:
+1. `generate_sql()` — given a fixed schema description (only the columns
+   relevant to spend analysis: `date`, `merchant`, `amount`, `category`,
+   `payment_method`, `is_transfer`, `confidence`, `extracted_at` — never the
+   raw email fields or any other table) and the question, Claude returns
+   structured output: either a SQL `SELECT` or `can_answer: false` if the
+   question is out of scope. It never executes anything itself.
+2. `validate_sql()` — defense-in-depth re-check of the returned SQL before
+   execution, independent of the prompt instructions: must be a single
+   `SELECT`, no forbidden keywords (`INSERT`/`UPDATE`/`DELETE`/`DROP`/…), must
+   reference `transactions` and no other known table, and gets a `LIMIT 200`
+   appended if missing.
+3. `Store.run_readonly_query()` executes the validated SQL and returns
+   JSON-safe rows (`Decimal` → `float`, dates → ISO strings).
+4. `compose_answer()` — a second Claude Sonnet 5 call turns the question +
+   raw rows into a one- or two-sentence natural-language reply; told
+   explicitly to say there's no data rather than guess when rows are empty.
+
+Both calls use adaptive thinking and `effort: "medium"` (FR-18). The
+frontend's `QaChat.vue` is a simple chat card (question in, answer + a
+collapsible "SQL used" block out) — the exchange history lives only in
+browser memory, nothing is persisted server-side.
 
 ### Database (`migrations/`)
 - `001_epic1.sql` — `transactions`, `processed_emails`, `flagged_emails`,

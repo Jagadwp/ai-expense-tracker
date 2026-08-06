@@ -4,6 +4,7 @@ import type {
   CategoryTrendPoint,
   Filters,
   PeriodComparison,
+  QaAnswer,
   Transaction,
   TransactionDetail,
   TrendPoint,
@@ -72,4 +73,16 @@ export async function setIsTransfer(messageId: string, isTransfer: boolean): Pro
   if (!res.ok) {
     throw new Error(`mark-as-transfer failed: ${res.status}`)
   }
+}
+
+export async function askQuestion(question: string): Promise<QaAnswer> {
+  const res = await fetch('/api/qa/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+  if (!res.ok) {
+    throw new Error(`ask failed: ${res.status}`)
+  }
+  return res.json()
 }

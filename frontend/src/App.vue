@@ -19,6 +19,7 @@ import TrendChart from './components/TrendChart.vue'
 import CategoryTrendChart from './components/CategoryTrendChart.vue'
 import TransactionTable from './components/TransactionTable.vue'
 import TransactionPreviewModal from './components/TransactionPreviewModal.vue'
+import QaChat from './components/QaChat.vue'
 import type {
   CategoryPeriodComparison,
   CategoryTotal,
@@ -107,6 +108,8 @@ const hasError = computed(() => loadError.value !== null)
     </header>
 
     <main>
+      <QaChat />
+
       <FilterBar :categories="categories" :available-months="availableMonths" :filters="filters" @update:filters="(f) => (filters = f)" />
 
       <p v-if="hasError" class="error">Failed to load dashboard data: {{ loadError }}</p>

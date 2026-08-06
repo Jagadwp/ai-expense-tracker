@@ -10,6 +10,7 @@ at the call site.
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 import psycopg
 
@@ -596,3 +597,27 @@ class Store:
             {"date": row[0].date().isoformat(), "category": row[1], "total": float(row[2])}
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Q&A agent (M6) — executes SQL already checked by qa_agent.validate_sql
+    # ------------------------------------------------------------------
+
+    async def run_readonly_query(self, sql: str) -> list[dict]:
+        """Execute a pre-validated read-only query and return rows as
+        JSON-safe dicts. The caller (app.main) must have already run
+        qa_agent.validate_sql() — this method trusts its input and does not
+        re-check it."""
+
+        def to_jsonable(value):
+            if isinstance(value, (datetime, date)):
+                return value.isoformat()
+            if isinstance(value, Decimal):
+                return float(value)
+            return value
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(sql)
+            rows = await cur.fetchall()
+            columns = [desc.name for desc in cur.description]
+
+        return [{col: to_jsonable(val) for col, val in zip(columns, row)} for row in rows]

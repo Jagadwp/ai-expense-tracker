@@ -17,6 +17,7 @@ from app import gmail_auth
 from app.config import get_settings
 from app.extraction import CONFIDENCE_THRESHOLD, extract_transaction
 from app.imap_idle import ImapIdleListener
+from app.qa_agent import UnsafeSqlError, compose_answer, generate_sql, validate_sql
 from app.scheduler import create_scheduler
 from app.security import Encryptor
 from app.store import NotFoundError, Store
@@ -318,3 +319,28 @@ async def api_category_trend(date_from: date, date_to: date):
     """Total spend per day per category within [date_from, date_to], for a
     multi-line trend chart, excluding transfers."""
     return await app.state.store.category_trend(date_from=date_from, date_to=date_to)
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/qa/ask")
+async def api_qa_ask(body: AskRequest):
+    """Ask a natural-language question about expense data (M6): Claude
+    Sonnet 5 translates the question into SQL, the query is validated and
+    executed read-only, and the result is composed into a plain-language
+    answer (FR-11/FR-12/FR-13)."""
+    result = generate_sql(app.state.anthropic, body.question)
+    if not result.can_answer or not result.sql:
+        return {"answer": "I can't answer that from the expense data I have.", "sql": None}
+
+    try:
+        sql = validate_sql(result.sql)
+    except UnsafeSqlError as exc:
+        logger.warning("qa agent generated unsafe SQL: %s (%s)", result.sql, exc)
+        return {"answer": "I couldn't safely answer that question.", "sql": None}
+
+    rows = await app.state.store.run_readonly_query(sql)
+    answer = compose_answer(app.state.anthropic, body.question, rows)
+    return {"answer": answer, "sql": sql}
