@@ -5,8 +5,9 @@ import type {
   Filters,
   PeriodComparison,
   QaAnswer,
-  Transaction,
   TransactionDetail,
+  TransactionPage,
+  TransactionQuery,
   TrendPoint,
 } from './types'
 
@@ -22,11 +23,17 @@ function rangeParams(filters: Pick<Filters, 'dateFrom' | 'dateTo'>): URLSearchPa
   return new URLSearchParams({ date_from: filters.dateFrom, date_to: filters.dateTo })
 }
 
-export function fetchTransactions(filters: Filters): Promise<Transaction[]> {
-  const params = rangeParams(filters)
-  params.set('sort_by', filters.sortBy)
-  params.set('include_transfers', String(filters.includeTransfers))
-  if (filters.category) params.set('category', filters.category)
+export function fetchTransactions(query: TransactionQuery): Promise<TransactionPage> {
+  const params = new URLSearchParams({
+    date_from: query.dateFrom,
+    date_to: query.dateTo,
+    include_transfers: String(query.includeTransfers),
+    sort_by: query.sortBy,
+    sort_dir: query.sortDir,
+    page: String(query.page),
+    page_size: String(query.pageSize),
+  })
+  if (query.category) params.set('category', query.category)
   return getJson(`/api/transactions?${params}`)
 }
 

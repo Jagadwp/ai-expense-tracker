@@ -8,9 +8,8 @@ import {
   fetchCategoryTrend,
   fetchPeriodComparison,
   fetchSpendTrend,
-  fetchTransactions,
 } from './api'
-import { DEFAULT_PRESET, PRESETS, presetRange } from './dateRange'
+import { monthToDateRange } from './dateRange'
 import FilterBar from './components/FilterBar.vue'
 import PeriodComparisonMetrics from './components/PeriodComparisonMetrics.vue'
 import CategoryPeriodMetrics from './components/CategoryPeriodMetrics.vue'
@@ -26,23 +25,20 @@ import type {
   CategoryTrendPoint,
   Filters,
   PeriodComparison,
-  Transaction,
   TrendPoint,
 } from './types'
 
-const defaultRange = presetRange(PRESETS.find((p) => p.label === DEFAULT_PRESET)!, new Date())
+const defaultRange = monthToDateRange(new Date())
 
 const filters = ref<Filters>({
   category: null,
   dateFrom: defaultRange.dateFrom,
   dateTo: defaultRange.dateTo,
-  sortBy: 'date',
   includeTransfers: false,
 })
 
 const categories = ref<string[]>([])
 const availableMonths = ref<string[]>([])
-const transactions = ref<Transaction[]>([])
 const categoryTotals = ref<CategoryTotal[]>([])
 const spendTrend = ref<TrendPoint[]>([])
 const comparison = ref<PeriodComparison>({ current_total: 0, previous_total: 0 })
@@ -51,21 +47,21 @@ const categoryTrend = ref<CategoryTrendPoint[]>([])
 
 const loadError = ref<string | null>(null)
 const previewMessageId = ref<string | null>(null)
+const transactionsRefreshKey = ref(0)
 
 async function onTransferUpdated() {
+  transactionsRefreshKey.value++
   await loadRangeDependent()
 }
 
 async function loadRangeDependent() {
-  const [tx, totals, trend, comp, catComp, catTrend] = await Promise.all([
-    fetchTransactions(filters.value),
+  const [totals, trend, comp, catComp, catTrend] = await Promise.all([
     fetchCategoryTotals(filters.value),
     fetchSpendTrend(filters.value),
     fetchPeriodComparison(filters.value),
     fetchCategoryPeriodComparison(filters.value),
     fetchCategoryTrend(filters.value),
   ])
-  transactions.value = tx
   categoryTotals.value = totals
   spendTrend.value = trend
   comparison.value = comp
@@ -126,7 +122,14 @@ const hasError = computed(() => loadError.value !== null)
 
         <CategoryTrendChart :trend="categoryTrend" />
 
-        <TransactionTable :transactions="transactions" @preview="(id) => (previewMessageId = id)" />
+        <TransactionTable
+          :date-from="filters.dateFrom"
+          :date-to="filters.dateTo"
+          :category="filters.category"
+          :include-transfers="filters.includeTransfers"
+          :refresh-key="transactionsRefreshKey"
+          @preview="(id) => (previewMessageId = id)"
+        />
       </template>
     </main>
 

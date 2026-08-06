@@ -72,13 +72,6 @@ const activePreset = computed(() => {
       </select>
     </div>
 
-    <div class="group">
-      <select :value="filters.sortBy" @change="update({ sortBy: ($event.target as HTMLSelectElement).value as Filters['sortBy'] })">
-        <option value="date">Sort: date</option>
-        <option value="amount">Sort: amount</option>
-      </select>
-    </div>
-
     <label class="checkbox">
       <input
         type="checkbox"

@@ -31,6 +31,12 @@ export function presetRange(preset: RangePreset, today: Date): { dateFrom: strin
   return { dateFrom: toIsoDate(from), dateTo: toIsoDate(today) }
 }
 
+/** Month-to-date: from the 1st of the current month through today. */
+export function monthToDateRange(today: Date): { dateFrom: string; dateTo: string } {
+  const dateFrom = toIsoDate(new Date(today.getFullYear(), today.getMonth(), 1))
+  return { dateFrom, dateTo: toIsoDate(today) }
+}
+
 /** Full calendar-month range for a "YYYY-MM" value, e.g. "2026-08" -> Aug 1 – Aug 31. */
 export function monthRange(yyyyMm: string): { dateFrom: string; dateTo: string } {
   const [year, month] = yyyyMm.split('-').map(Number)

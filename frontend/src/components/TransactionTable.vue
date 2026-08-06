@@ -1,14 +1,102 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import type { Transaction } from '../types'
+import { computed, onMounted, ref, watch } from 'vue'
+import { fetchTransactions } from '../api'
+import type { SortColumn, SortDir, Transaction } from '../types'
 
-defineProps<{ transactions: Transaction[] }>()
+const props = defineProps<{
+  dateFrom: string
+  dateTo: string
+  category: string | null
+  includeTransfers: boolean
+  refreshKey: number
+}>()
 
 const emit = defineEmits<{
   preview: [messageId: string]
 }>()
 
+const COLUMNS: { key: SortColumn; label: string; defaultDir: SortDir }[] = [
+  { key: 'date', label: 'Date', defaultDir: 'desc' },
+  { key: 'merchant', label: 'Merchant', defaultDir: 'asc' },
+  { key: 'category', label: 'Category', defaultDir: 'asc' },
+  { key: 'amount', label: 'Amount', defaultDir: 'desc' },
+  { key: 'payment_method', label: 'Payment method', defaultDir: 'asc' },
+  { key: 'is_transfer', label: 'Transfer', defaultDir: 'desc' },
+]
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const ALL_PAGE_SIZE = 100_000
+
+const transactions = ref<Transaction[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const pageSizeSelection = computed(() => (pageSize.value === ALL_PAGE_SIZE ? 'all' : String(pageSize.value)))
+const sortBy = ref<SortColumn>('date')
+const sortDir = ref<SortDir>('desc')
+const loading = ref(false)
+const loadError = ref<string | null>(null)
 const copiedId = ref<string | null>(null)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+
+async function load() {
+  loading.value = true
+  try {
+    loadError.value = null
+    const result = await fetchTransactions({
+      dateFrom: props.dateFrom,
+      dateTo: props.dateTo,
+      category: props.category,
+      includeTransfers: props.includeTransfers,
+      sortBy: sortBy.value,
+      sortDir: sortDir.value,
+      page: page.value,
+      pageSize: pageSize.value,
+    })
+    transactions.value = result.items
+    total.value = result.total
+  } catch (err) {
+    loadError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(load)
+
+watch(
+  () => [props.dateFrom, props.dateTo, props.category, props.includeTransfers],
+  () => {
+    page.value = 1
+    load()
+  },
+)
+
+watch(() => props.refreshKey, load)
+
+function sortByColumn(column: (typeof COLUMNS)[number]) {
+  if (sortBy.value === column.key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = column.key
+    sortDir.value = column.defaultDir
+  }
+  page.value = 1
+  load()
+}
+
+function goToPage(p: number) {
+  if (p < 1 || p > totalPages.value || p === page.value) return
+  page.value = p
+  load()
+}
+
+function onPageSizeChange(value: string) {
+  pageSize.value = value === 'all' ? ALL_PAGE_SIZE : Number(value)
+  page.value = 1
+  load()
+}
 
 async function copyId(messageId: string) {
   await navigator.clipboard.writeText(messageId)
@@ -30,19 +118,22 @@ function formatDate(value: string | null): string {
 
 <template>
   <div class="table-card">
-    <h3>Transactions</h3>
-    <p v-if="!transactions.length" class="empty">No transactions match the current filters.</p>
+    <div class="header">
+      <h3>Transactions</h3>
+      <span class="total-count">{{ total }} total</span>
+    </div>
+
+    <p v-if="loadError" class="error">Failed to load transactions: {{ loadError }}</p>
+    <p v-else-if="!loading && !transactions.length" class="empty">No transactions match the current filters.</p>
     <template v-else>
       <table>
         <thead>
           <tr>
             <th>ID</th>
-            <th>Date</th>
-            <th>Merchant</th>
-            <th>Category</th>
-            <th>Amount</th>
-            <th>Payment method</th>
-            <th>Transfer</th>
+            <th v-for="col in COLUMNS" :key="col.key" class="sortable" @click="sortByColumn(col)">
+              {{ col.label }}
+              <span v-if="sortBy === col.key" class="sort-indicator">{{ sortDir === 'asc' ? '▲' : '▼' }}</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -68,7 +159,22 @@ function formatDate(value: string | null): string {
           </tr>
         </tbody>
       </table>
-      <p class="caption">{{ transactions.length }} transaction(s)</p>
+
+      <div class="pagination">
+        <label class="page-size">
+          Rows per page
+          <select :value="pageSizeSelection" @change="onPageSizeChange(($event.target as HTMLSelectElement).value)">
+            <option v-for="opt in PAGE_SIZE_OPTIONS" :key="opt" :value="String(opt)">{{ opt }}</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+
+        <div class="page-nav">
+          <button :disabled="page === 1" @click="goToPage(page - 1)">Prev</button>
+          <span>Page {{ page }} of {{ totalPages }}</span>
+          <button :disabled="page === totalPages" @click="goToPage(page + 1)">Next</button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -82,9 +188,21 @@ function formatDate(value: string | null): string {
   padding: 1.5rem;
 }
 
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
 h3 {
-  margin: 0 0 1rem;
+  margin: 0;
   font-size: 1rem;
+}
+
+.total-count {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
 }
 
 table {
@@ -104,6 +222,21 @@ th {
   color: var(--text-secondary);
   font-weight: 500;
   font-size: 0.8rem;
+}
+
+th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+th.sortable:hover {
+  color: var(--text-primary);
+}
+
+.sort-indicator {
+  font-size: 0.65rem;
+  color: var(--accent);
 }
 
 .id {
@@ -156,8 +289,62 @@ th {
 }
 
 .empty,
-.caption {
+.error {
   color: var(--text-secondary);
   font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.page-size {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.page-size select {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.page-nav button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+.page-nav button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-nav button:not(:disabled):hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 </style>

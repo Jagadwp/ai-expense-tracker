@@ -57,6 +57,24 @@ export interface Filters {
   category: string | null
   dateFrom: string
   dateTo: string
-  sortBy: 'date' | 'amount'
   includeTransfers: boolean
+}
+
+export type SortColumn = 'date' | 'merchant' | 'category' | 'amount' | 'payment_method' | 'is_transfer'
+export type SortDir = 'asc' | 'desc'
+
+export interface TransactionQuery {
+  dateFrom: string
+  dateTo: string
+  category: string | null
+  includeTransfers: boolean
+  sortBy: SortColumn
+  sortDir: SortDir
+  page: number
+  pageSize: number
+}
+
+export interface TransactionPage {
+  items: Transaction[]
+  total: number
 }

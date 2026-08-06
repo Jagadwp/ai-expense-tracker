@@ -100,7 +100,7 @@ batch.
 | `DELETE /auth/google` | Disconnect the Gmail account |
 | `POST /sync?newer_than=7d` | Manually trigger a sync |
 | `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`) |
-| `GET /api/transactions?date_from=&date_to=` | List extracted transactions in range (filters: `category`, `sort_by`, `include_transfers`) |
+| `GET /api/transactions?date_from=&date_to=` | One page of extracted transactions in range — `{"items": [...], "total": N}`. Filters: `category`, `include_transfers`; sortable by any column via `sort_by`/`sort_dir`; paginated via `page`/`page_size` (max 100000, used as an "all rows" sentinel) |
 | `GET /api/transactions/{message_id}` | Full record (raw email fields + extracted fields) for one transaction, for the email-preview modal |
 | `PATCH /api/transactions/{message_id}/is-transfer` | Manually flag/unflag a transaction as a fund transfer, from the email-preview modal |
 | `GET /api/categories` | Distinct categories present in extracted transactions |
@@ -164,30 +164,34 @@ API:
 - A date-range picker: native `<input type="date">` from/to fields, quick
   presets (7D/1M/3M/6M/1Y), and a "by month" shortcut scoped to months that
   actually have data — picking a month snaps the range to that full
-  calendar month and highlights the 1M preset. Default range on load: the
-  last month.
-- A category filter and a sort-by (date/amount) control, both scoped to the
-  transaction table only.
+  calendar month and highlights the 1M preset. Default range on load:
+  month-to-date (the 1st of the current month through today).
+- A category filter, scoped to the transaction table only.
 - A period-over-period metric (selected range vs. the immediately preceding
   range of equal length), broken out overall and per category, a
   category-breakdown donut chart, a daily spend-trend line chart, and a
   daily spend-trend line chart per category (one line per category) — all
   recompute whenever the date range changes.
-- The filtered transaction table, with the message ID and a copy-to-clipboard
-  button per row. Clicking a row opens an email-preview modal: the extracted
-  fields on the left, the original raw email HTML rendered in a sandboxed
-  `<iframe>` (no scripts, no same-origin access — the email body is
-  untrusted content) on the right, and a "mark/unmark as transfer" action
-  that PATCHes `is_transfer` and refreshes the whole dashboard (every spend
-  aggregate depends on that flag).
+- The transaction table is paginated and self-fetching (own `page`/
+  `page_size`/`sort_by`/`sort_dir` state, independent of the rest of the
+  dashboard): click any column header to sort by it (toggling direction on
+  a second click), choose rows-per-page (10/20/50/100/All), and page with
+  Prev/Next. Each row shows the message ID with a copy-to-clipboard button.
+  Clicking a row opens an email-preview modal: the extracted fields on the
+  left, the original raw email HTML rendered in a sandboxed `<iframe>` (no
+  scripts, no same-origin access — the email body is untrusted content) on
+  the right, and a "mark/unmark as transfer" action that PATCHes
+  `is_transfer` and refreshes both the table and the rest of the dashboard
+  (every spend aggregate depends on that flag).
 
 ### `app/qa_agent.py` — Q&A agent (M6, text-to-SQL)
 `POST /api/qa/ask` lets the dashboard ask a natural-language question about
 expense data. Two separate Claude Sonnet 5 calls, not one agentic loop:
 1. `generate_sql()` — given a fixed schema description (only the columns
-   relevant to spend analysis: `date`, `merchant`, `amount`, `category`,
-   `payment_method`, `is_transfer`, `confidence`, `extracted_at` — never the
-   raw email fields or any other table) and the question, Claude returns
+   relevant to spend analysis: `message_id`, `date`, `merchant`, `amount`,
+   `category`, `payment_method`, `is_transfer`, `confidence`,
+   `extracted_at` — never the raw email fields or any other table) and the
+   question, Claude returns
    structured output: either a SQL `SELECT` or `can_answer: false` if the
    question is out of scope. It never executes anything itself.
 2. `validate_sql()` — defense-in-depth re-check of the returned SQL before

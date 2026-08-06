@@ -26,6 +26,8 @@ MODEL = "claude-sonnet-5"
 
 SCHEMA_DESCRIPTION = """\
 Table: transactions (the only table available for querying)
+- message_id (text): unique identifier for the transaction/email. Select \
+this when the user asks for an "id", "transaction id", or similar.
 - date (timestamptz): transaction date
 - merchant (text): merchant or recipient name
 - amount (numeric): amount in IDR

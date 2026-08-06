@@ -334,22 +334,40 @@ class Store:
     # served over the /api/* routes in app.main.
     # ------------------------------------------------------------------
 
+    # Whitelist mapping — never interpolate a caller-supplied column name
+    # directly into SQL. FastAPI's Literal type on the route already
+    # restricts sort_by, but this is checked again here as the actual
+    # injection guard.
+    _SORT_COLUMNS = {
+        "date": "date",
+        "merchant": "merchant",
+        "category": "category",
+        "amount": "amount",
+        "payment_method": "payment_method",
+        "is_transfer": "is_transfer",
+    }
+
     async def list_transactions(
         self,
         date_from: date,
         date_to: date,
         category: str | None = None,
         sort_by: str = "date",
+        sort_dir: str = "desc",
         include_transfers: bool = True,
-    ) -> list[dict]:
-        """Return extracted transactions within [date_from, date_to]
-        (inclusive), optionally filtered by category, sorted by date or
-        amount (descending).
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        """Return one page of extracted transactions within [date_from,
+        date_to] (inclusive), optionally filtered by category, sorted by
+        any column. Returns {"items": [...], "total": <matching row count>}
+        so the caller can render pagination controls.
 
         Transfers (is_transfer=true) are included by default so they stay
         visible for audit — they're excluded from spend totals elsewhere in
         this module, not hidden from the list."""
-        order_column = "amount" if sort_by == "amount" else "date"
+        order_column = self._SORT_COLUMNS.get(sort_by, "date")
+        order_dir = "ASC" if sort_dir == "asc" else "DESC"
 
         conditions = ["extracted_at IS NOT NULL", "date >= %s", "date < %s"]
         params: list = [date_from, date_to + timedelta(days=1)]
@@ -358,18 +376,24 @@ class Store:
             params.append(category)
         if not include_transfers:
             conditions.append("is_transfer = false")
+        where_clause = " AND ".join(conditions)
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(f"SELECT COUNT(*) FROM transactions WHERE {where_clause}", params)
+            total = (await cur.fetchone())[0]
 
         query = f"""
             SELECT message_id, date, merchant, category, amount, payment_method, is_transfer
             FROM transactions
-            WHERE {" AND ".join(conditions)}
-            ORDER BY {order_column} DESC
+            WHERE {where_clause}
+            ORDER BY {order_column} {order_dir} NULLS LAST
+            LIMIT %s OFFSET %s
         """
         async with self._conn.cursor() as cur:
-            await cur.execute(query, params)
+            await cur.execute(query, [*params, page_size, (page - 1) * page_size])
             rows = await cur.fetchall()
 
-        return [
+        items = [
             {
                 "message_id": row[0],
                 "date": row[1].isoformat() if row[1] else None,
@@ -381,6 +405,7 @@ class Store:
             }
             for row in rows
         ]
+        return {"items": items, "total": total}
 
     async def get_transaction_detail(self, message_id: str) -> dict | None:
         """Return the full record (raw email fields + extracted fields) for

@@ -5,10 +5,11 @@ import logging
 from contextlib import asynccontextmanager
 
 from datetime import date
+from typing import Literal
 
 import psycopg
 from anthropic import Anthropic
-from fastapi import FastAPI, HTTPException, Response, status
+from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -227,22 +228,36 @@ async def extract(limit: int | None = 50):
     }
 
 
+SortColumn = Literal["date", "merchant", "category", "amount", "payment_method", "is_transfer"]
+SortDir = Literal["asc", "desc"]
+
+
 @app.get("/api/transactions")
 async def api_transactions(
     date_from: date,
     date_to: date,
     category: str | None = None,
-    sort_by: str = "date",
+    sort_by: SortColumn = "date",
+    sort_dir: SortDir = "desc",
     include_transfers: bool = True,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100_000),
 ):
-    """List extracted transactions within [date_from, date_to] for the
-    dashboard (M5)."""
+    """List one page of extracted transactions within [date_from, date_to]
+    for the dashboard (M5). Returns {"items": [...], "total": N}.
+
+    page_size's upper bound is high enough to act as an "all rows" option
+    from the frontend (a LIMIT larger than the matching row count is a
+    cheap no-op in Postgres) without removing the bound entirely."""
     return await app.state.store.list_transactions(
         date_from=date_from,
         date_to=date_to,
         category=category,
         sort_by=sort_by,
+        sort_dir=sort_dir,
         include_transfers=include_transfers,
+        page=page,
+        page_size=page_size,
     )
 
 
