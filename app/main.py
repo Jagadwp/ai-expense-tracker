@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
         await app.state.db_conn.close()
 
 
-app = FastAPI(title="expense-tracker-ai", lifespan=lifespan)
+app = FastAPI(title="AI Expense Tracker", lifespan=lifespan)
 
 # Dev-mode Vite server runs on a different origin (localhost:5173) than
 # FastAPI (localhost:8080); the browser enforces CORS between them.
