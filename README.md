@@ -5,8 +5,7 @@ expense data with an LLM, stores it in PostgreSQL, and (in later milestones)
 surfaces it through a dashboard and a natural-language Q&A agent.
 
 > Full product spec: [`document/PRD.md`](document/PRD.md) and
-> [`document/DATABASE_SCHEMA.md`](document/DATABASE_SCHEMA.md) (not tracked in
-> git — local planning docs).
+> [`document/DATABASE_SCHEMA.md`](document/DATABASE_SCHEMA.md).
 
 ## Current status
 

@@ -13,9 +13,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Local planning docs (not shared in the repo)
-/document/
-
 # Editor / OS
 .DS_Store
 .idea/
