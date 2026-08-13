@@ -145,7 +145,7 @@ async def auth_google_disconnect():
     return {"status": "disconnected"}
 
 
-@app.post("/sync")
+@app.post("/api/sync")
 async def sync(newer_than: str = "7d"):
     """Manually trigger a Gmail sync: fetch, dedup, and ingest new
     transaction emails for the connected account."""
@@ -157,7 +157,7 @@ async def sync(newer_than: str = "7d"):
         raise HTTPException(status_code=502, detail=f"sync failed: {exc}")
 
 
-@app.post("/extract")
+@app.post("/api/extract")
 async def extract(limit: int | None = 50):
     """Run LLM extraction (M4) over raw transactions not yet extracted.
 

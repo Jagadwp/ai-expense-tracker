@@ -90,7 +90,7 @@ A single email's failure is recorded in `flagged_emails` — it never stops the
 rest of the sync.
 
 ### `app/sync_runner.py` — shared sync orchestration
-`run_sync()`: the common logic behind the manual `/sync` route, the scheduled
+`run_sync()`: the common logic behind the manual `/api/sync` route, the scheduled
 job, and the IMAP IDLE trigger — get the stored token, refresh it if expired,
 run `GmailSyncer`, and record the result to `sync_logs`.
 
@@ -122,10 +122,10 @@ batch.
 | `GET /auth/google/callback` | Exchange code, encrypt, store the token |
 | `GET /auth/google/status` | Report whether Gmail is connected |
 | `DELETE /auth/google` | Disconnect the Gmail account |
-| `POST /sync?newer_than=7d` | Manually trigger a sync |
-| `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`). Returns `remaining_unextracted` — how many are still unextracted after this batch |
-| `POST /api/sync-and-extract?newer_than=7d&limit=50` | Dashboard "Sync now" action: run a sync, then one bounded extraction batch over whatever came in. Returns `{"sync": {...}, "extraction": {...}}` (same shapes as `/sync` and `/extract`) |
-| `GET /api/sync-progress` | Poll target for the dashboard's live "Syncing X of Y" indicator while `/extract` or `/api/sync-and-extract` is in flight — `{"processed": N, "total": M}`, both `0` when idle |
+| `POST /api/sync?newer_than=7d` | Manually trigger a sync |
+| `POST /api/extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`). Returns `remaining_unextracted` — how many are still unextracted after this batch |
+| `POST /api/sync-and-extract?newer_than=7d&limit=50` | Dashboard "Sync now" action: run a sync, then one bounded extraction batch over whatever came in. Returns `{"sync": {...}, "extraction": {...}}` (same shapes as `/api/sync` and `/api/extract`) |
+| `GET /api/sync-progress` | Poll target for the dashboard's live "Syncing X of Y" indicator while `/api/extract` or `/api/sync-and-extract` is in flight — `{"processed": N, "total": M}`, both `0` when idle |
 | `GET /api/transactions?date_from=&date_to=` | One page of extracted transactions in range — `{"items": [...], "total": N}`. Filters: `category`, `include_transfers`; sortable by any column via `sort_by`/`sort_dir`; paginated via `page`/`page_size` (max 100000, used as an "all rows" sentinel) |
 | `GET /api/transactions/{message_id}` | Full record (raw email fields + extracted fields) for one transaction, for the email-preview modal |
 | `PATCH /api/transactions/{message_id}/is-transfer` | Manually flag/unflag a transaction as a fund transfer, from the email-preview modal |
@@ -318,9 +318,9 @@ uvicorn app.main:app --reload --port 8080
 Then:
 1. Open `http://localhost:8080/auth/google` in a browser and complete the
    Google consent flow.
-2. Trigger a sync: `curl -X POST "http://localhost:8080/sync?newer_than=90d"`
+2. Trigger a sync: `curl -X POST "http://localhost:8080/api/sync?newer_than=90d"`
 3. Check status: `curl http://localhost:8080/auth/google/status`
-4. Extract transaction data: `curl -X POST "http://localhost:8080/extract?limit=50"`
+4. Extract transaction data: `curl -X POST "http://localhost:8080/api/extract?limit=50"`
 
 ## Running the dashboard
 

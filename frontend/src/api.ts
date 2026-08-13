@@ -109,7 +109,7 @@ export function syncAndExtract(newerThan: string, limit: number): Promise<SyncAn
 }
 
 export function runExtraction(limit: number): Promise<ExtractionSummary> {
-  return postJson(`/extract?limit=${limit}`)
+  return postJson(`/api/extract?limit=${limit}`)
 }
 
 export function fetchSyncProgress(): Promise<SyncProgress> {
