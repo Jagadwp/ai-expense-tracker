@@ -278,6 +278,11 @@ ON CONFLICT (email_address) DO NOTHING;
 
 ## Running the app
 
+Shortcut: `make dev` runs the API and the frontend together (`Ctrl+C` stops
+both). See the `Makefile` for other shortcuts (`make install`, `make api`,
+`make frontend`, `make migrate`, `make test`, `make typecheck`,
+`make genkey`).
+
 ```bash
 source venv/bin/activate
 uvicorn app.main:app --reload --port 8080
