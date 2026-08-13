@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from app import gmail_auth
 from app.config import get_settings
-from app.extraction import CONFIDENCE_THRESHOLD, extract_transaction
+from app.extract_runner import run_extraction
 from app.imap_idle import ImapIdleListener
 from app.qa_agent import UnsafeSqlError, compose_answer, generate_sql, validate_sql
 from app.scheduler import create_scheduler
@@ -38,9 +38,13 @@ async def lifespan(app: FastAPI):
     app.state.encryptor = Encryptor(settings.encryption_key)
     app.state.anthropic = Anthropic(api_key=settings.anthropic_api_key)
 
+    # Polled by the dashboard's "Sync now" indicator while a manual
+    # sync/extract batch is in flight (see /api/sync-progress below).
+    app.state.sync_progress = {"processed": 0, "total": 0}
+
     # Scheduled sync (US-02): background fallback, runs every 30 minutes
     # regardless of whether the IMAP IDLE listener is working.
-    app.state.scheduler = create_scheduler(app.state.store, app.state.encryptor)
+    app.state.scheduler = create_scheduler(app.state.store, app.state.encryptor, app.state.anthropic)
     app.state.scheduler.start()
 
     # IMAP IDLE listener (US-04): real-time trigger, only started if IMAP
@@ -49,7 +53,7 @@ async def lifespan(app: FastAPI):
     app.state.imap_listener = None
     if settings.gmail_imap_user and settings.gmail_imap_app_password:
         app.state.imap_listener = ImapIdleListener(
-            settings, app.state.store, app.state.encryptor, asyncio.get_running_loop()
+            settings, app.state.store, app.state.encryptor, app.state.anthropic, asyncio.get_running_loop()
         )
         app.state.imap_listener.start()
     else:
@@ -166,66 +170,50 @@ async def extract(limit: int | None = 50):
     One email's failure is recorded in flagged_emails and does not stop the
     rest of the batch (FR-06).
     """
-    candidates = await app.state.store.get_unextracted_transactions(limit=limit)
 
-    extracted = 0
-    skipped_non_transaction = 0
-    flagged_low_confidence = 0
-    failed = 0
+    def on_progress(processed: int, total: int) -> None:
+        app.state.sync_progress = {"processed": processed, "total": total}
 
-    for tx in candidates:
-        try:
-            result = extract_transaction(
-                app.state.anthropic, tx.raw_subject, tx.raw_from, tx.raw_body
-            )
+    try:
+        return await run_extraction(app.state.store, app.state.anthropic, limit, on_progress=on_progress)
+    finally:
+        app.state.sync_progress = {"processed": 0, "total": 0}
 
-            if not result.is_transaction:
-                await app.state.store.delete_non_transaction(tx.message_id)
-                skipped_non_transaction += 1
-            elif result.confidence < CONFIDENCE_THRESHOLD:
-                await app.state.store.set_low_confidence(tx.message_id, result.confidence)
-                await app.state.store.flag_email(
-                    message_id=tx.message_id,
-                    raw_body=tx.raw_body,
-                    error_message=f"low confidence: {result.model_dump_json()}",
-                    flagged_reason="low_confidence",
-                )
-                flagged_low_confidence += 1
-            else:
-                await app.state.store.apply_extraction(
-                    message_id=tx.message_id,
-                    date=result.date,
-                    merchant=result.merchant,
-                    amount=result.amount,
-                    currency=result.currency,
-                    category=result.category,
-                    payment_method=result.payment_method,
-                    confidence=result.confidence,
-                    is_transfer=result.is_transfer,
-                )
-                extracted += 1
-        except Exception as exc:
-            logger.exception("extraction failed for message %s", tx.message_id)
-            # A failed query leaves the shared connection's transaction
-            # aborted until rolled back — without this, every subsequent
-            # query on this connection (including the flag_email below,
-            # and every later request) would fail too.
-            await app.state.db_conn.rollback()
-            await app.state.store.flag_email(
-                message_id=tx.message_id,
-                raw_body=tx.raw_body,
-                error_message=str(exc),
-                flagged_reason="extraction_error",
-            )
-            failed += 1
 
-    return {
-        "candidates": len(candidates),
-        "extracted": extracted,
-        "skipped_non_transaction": skipped_non_transaction,
-        "flagged_low_confidence": flagged_low_confidence,
-        "failed": failed,
-    }
+@app.post("/api/sync-and-extract")
+async def api_sync_and_extract(newer_than: str = "7d", limit: int = 50):
+    """Dashboard "Sync now" action: fetch new transaction emails, then
+    immediately run one bounded extraction batch over whatever is
+    unextracted. Returns both summaries; `extraction.remaining_unextracted`
+    tells the frontend whether to offer an "extract more" follow-up instead
+    of looping automatically — every batch is a real LLM-API cost, so this
+    endpoint never extracts an unbounded backlog on its own."""
+    try:
+        sync_result = await run_sync(app.state.store, app.state.encryptor, "manual", newer_than)
+    except NoGmailConnected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"sync failed: {exc}")
+
+    def on_progress(processed: int, total: int) -> None:
+        app.state.sync_progress = {"processed": processed, "total": total}
+
+    try:
+        extraction_result = await run_extraction(
+            app.state.store, app.state.anthropic, limit, on_progress=on_progress
+        )
+    finally:
+        app.state.sync_progress = {"processed": 0, "total": 0}
+
+    return {"sync": sync_result, "extraction": extraction_result}
+
+
+@app.get("/api/sync-progress")
+async def api_sync_progress():
+    """Poll target for the dashboard's live "Syncing X of Y" indicator while
+    a manual sync/extract batch (above) is in flight. Reports {"processed":
+    0, "total": 0} when nothing is running."""
+    return app.state.sync_progress
 
 
 SortColumn = Literal["date", "merchant", "category", "amount", "payment_method", "is_transfer"]

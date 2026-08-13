@@ -19,6 +19,7 @@ import CategoryTrendChart from './components/CategoryTrendChart.vue'
 import TransactionTable from './components/TransactionTable.vue'
 import TransactionPreviewModal from './components/TransactionPreviewModal.vue'
 import QaChat from './components/QaChat.vue'
+import SyncBar from './components/SyncBar.vue'
 import type {
   CategoryPeriodComparison,
   CategoryTotal,
@@ -122,6 +123,11 @@ const hasError = computed(() => loadError.value !== null)
 
         <CategoryTrendChart :trend="categoryTrend" />
 
+        <div class="transactions-header">
+          <h2>Transactions</h2>
+          <SyncBar @synced="onTransferUpdated" />
+        </div>
+
         <TransactionTable
           :date-from="filters.dateFrom"
           :date-to="filters.dateTo"
@@ -170,6 +176,19 @@ main {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5rem;
+}
+
+.transactions-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.transactions-header h2 {
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .error {

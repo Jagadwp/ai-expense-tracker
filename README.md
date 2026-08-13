@@ -28,6 +28,31 @@ exit code 139) on filter interaction — see the v4.1 changelog in
 `document/PRD.md`. A real SPA over a REST API also better demonstrates
 full-stack capability than a data-app-style dashboard.
 
+## To do
+
+- **Manual transaction entry** — modal to add a transaction by hand, plus
+  view/edit/delete for existing ones (planned together, separate commit from
+  "Sync now").
+- **Retry flagged emails** — small UI/endpoint to unflag a failed
+  `flagged_emails` row and re-queue it for sync/extraction, instead of the
+  current manual-`psql` workaround. Needed because a failed sync or
+  extraction (e.g. a dropped connection) is never retried automatically —
+  the affected email is permanently excluded once flagged.
+- **Flagged-emails review UI** — surface `flagged_emails` (low-confidence and
+  error rows) in the dashboard instead of requiring direct DB access.
+- **M6 eval set** — a fixed set of test questions/expected answers for the
+  Q&A agent, to catch regressions in `qa_agent.py` prompts.
+- **M7 — alerts & deploy** — not started. Deploy target still undecided
+  (PaaS like Railway/Render vs. a VPS + Docker + Caddy); key constraint is
+  the always-on IMAP IDLE listener + scheduler ruling out free-tier
+  auto-sleep platforms.
+- **Publish Google OAuth app to "Production"** — while the OAuth client is
+  in "Testing" publishing status, refresh tokens expire after ~7 days
+  (`invalid_grant: Token has been expired or revoked.`), requiring a manual
+  `GET /auth/google` re-consent. `refresh_if_expired()` only handles normal
+  access-token expiry, not an invalidated refresh token. Needed before
+  deploy so the app doesn't silently stop syncing every week.
+
 ## What's built so far
 
 ### `app/config.py` — configuration
@@ -98,7 +123,9 @@ batch.
 | `GET /auth/google/status` | Report whether Gmail is connected |
 | `DELETE /auth/google` | Disconnect the Gmail account |
 | `POST /sync?newer_than=7d` | Manually trigger a sync |
-| `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`) |
+| `POST /extract?limit=N` | Run LLM extraction over unextracted transactions (default `limit=50`). Returns `remaining_unextracted` — how many are still unextracted after this batch |
+| `POST /api/sync-and-extract?newer_than=7d&limit=50` | Dashboard "Sync now" action: run a sync, then one bounded extraction batch over whatever came in. Returns `{"sync": {...}, "extraction": {...}}` (same shapes as `/sync` and `/extract`) |
+| `GET /api/sync-progress` | Poll target for the dashboard's live "Syncing X of Y" indicator while `/extract` or `/api/sync-and-extract` is in flight — `{"processed": N, "total": M}`, both `0` when idle |
 | `GET /api/transactions?date_from=&date_to=` | One page of extracted transactions in range — `{"items": [...], "total": N}`. Filters: `category`, `include_transfers`; sortable by any column via `sort_by`/`sort_dir`; paginated via `page`/`page_size` (max 100000, used as an "all rows" sentinel) |
 | `GET /api/transactions/{message_id}` | Full record (raw email fields + extracted fields) for one transaction, for the email-preview modal |
 | `PATCH /api/transactions/{message_id}/is-transfer` | Manually flag/unflag a transaction as a fund transfer, from the email-preview modal |

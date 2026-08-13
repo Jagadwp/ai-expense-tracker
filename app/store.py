@@ -48,6 +48,13 @@ class Store:
     def __init__(self, conn: psycopg.AsyncConnection) -> None:
         self._conn = conn
 
+    async def rollback(self) -> None:
+        """Roll back the shared connection's current transaction. A failed
+        query leaves it aborted until this is called — every subsequent
+        query (including on later, unrelated requests) would otherwise fail
+        too. Called by extraction error handling (app.extract_runner)."""
+        await self._conn.rollback()
+
     async def save_token(
         self, user_id: str, encrypted_token: bytes, gmail_email: str
     ) -> None:

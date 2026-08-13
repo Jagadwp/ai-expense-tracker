@@ -2,19 +2,40 @@ import type {
   CategoryPeriodComparison,
   CategoryTotal,
   CategoryTrendPoint,
+  ExtractionSummary,
   Filters,
   PeriodComparison,
   QaAnswer,
+  SyncAndExtractResult,
+  SyncProgress,
   TransactionDetail,
   TransactionPage,
   TransactionQuery,
   TrendPoint,
 } from './types'
 
+async function errorDetail(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    if (typeof body?.detail === 'string') return body.detail
+  } catch {
+    // response body wasn't JSON — fall through to the generic message
+  }
+  return `HTTP ${res.status}`
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(path)
   if (!res.ok) {
-    throw new Error(`${path} failed: ${res.status}`)
+    throw new Error(`${path} failed: ${await errorDetail(res)}`)
+  }
+  return res.json()
+}
+
+async function postJson<T>(path: string): Promise<T> {
+  const res = await fetch(path, { method: 'POST' })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
   }
   return res.json()
 }
@@ -80,6 +101,19 @@ export async function setIsTransfer(messageId: string, isTransfer: boolean): Pro
   if (!res.ok) {
     throw new Error(`mark-as-transfer failed: ${res.status}`)
   }
+}
+
+export function syncAndExtract(newerThan: string, limit: number): Promise<SyncAndExtractResult> {
+  const params = new URLSearchParams({ newer_than: newerThan, limit: String(limit) })
+  return postJson(`/api/sync-and-extract?${params}`)
+}
+
+export function runExtraction(limit: number): Promise<ExtractionSummary> {
+  return postJson(`/extract?limit=${limit}`)
+}
+
+export function fetchSyncProgress(): Promise<SyncProgress> {
+  return getJson('/api/sync-progress')
 }
 
 export async function askQuestion(question: string): Promise<QaAnswer> {

@@ -78,3 +78,29 @@ export interface TransactionPage {
   items: Transaction[]
   total: number
 }
+
+export interface SyncSummary {
+  sync_log_id: string
+  emails_fetched: number
+  emails_new: number
+  emails_skipped: number
+}
+
+export interface ExtractionSummary {
+  candidates: number
+  extracted: number
+  skipped_non_transaction: number
+  flagged_low_confidence: number
+  failed: number
+  remaining_unextracted: number
+}
+
+export interface SyncAndExtractResult {
+  sync: SyncSummary
+  extraction: ExtractionSummary
+}
+
+export interface SyncProgress {
+  processed: number
+  total: number
+}

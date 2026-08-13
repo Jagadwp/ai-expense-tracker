@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:8080',
+      '/extract': 'http://127.0.0.1:8080',
+      '/sync': 'http://127.0.0.1:8080',
     },
   },
 })

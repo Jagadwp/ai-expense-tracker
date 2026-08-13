@@ -1,9 +1,18 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.1
+- **Version:** 4.2
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-06
+- **Last updated:** 2026-08-13
+
+> Changelog from v4.1: added a manual **"Sync now"** dashboard action
+> (`POST /api/sync-and-extract`) that runs a sync then one bounded
+> extraction batch in a single request, with a live "Syncing X of Y" polling
+> indicator. The scheduled sync (FR-04) and IMAP IDLE trigger (FR-05) now
+> also run a small, capped extraction batch (limit 10) right after syncing,
+> so the dashboard reflects finished transactions between visits instead of
+> raw, unextracted ones — capped low since background runs are unattended
+> and every extraction call is a real LLM-API cost.
 
 > Changelog from v3.0: stack pivoted from Go to **Python (FastAPI + Streamlit)** —
 > target market is entry-level AI/remote work (Upwork), where Python dominates
@@ -131,9 +140,16 @@ transaction email data, to support marketing/portfolio use.
 - **FR-02** Query emails using a configurable (not hardcoded) sender filter plus a
   `newer_than:7d` filter. **Priority senders: BSI, OVO, Shopee.**
 - **FR-03** The first (onboarding) sync pulls 90 days of history.
-- **FR-04** Routine sync runs every 30 minutes via a background job (APScheduler).
-- **FR-05** An IMAP IDLE listener detects new emails in real time and enqueues them
-  through the same processing pipeline as the scheduled sync.
+- **FR-04** Routine sync runs every 30 minutes via a background job (APScheduler),
+  followed by a small capped extraction batch (limit 10) over anything newly
+  synced.
+- **FR-05** An IMAP IDLE listener detects new emails in real time and triggers
+  the same sync-then-capped-extraction pipeline as the scheduled job.
+- **FR-19** A manual "Sync now" dashboard action runs a sync then one bounded
+  extraction batch (default limit 50) in a single request, with a live
+  progress indicator; a bounded "extract more" follow-up is offered instead
+  of looping automatically when a backlog remains, since extraction cost is
+  real and user-tracked.
 - **FR-06** A single email failure must not stop the pipeline.
 
 ### 4.2 LLM extraction

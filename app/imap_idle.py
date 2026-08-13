@@ -7,20 +7,30 @@ hands off to the app's asyncio event loop via run_coroutine_threadsafe to
 run the actual sync — through the same Gmail API pipeline as the manual and
 scheduled syncs (see app.sync_runner). IMAP here is only the trigger; it
 never reads message content itself.
+
+Each triggered sync also extracts up to EXTRACTION_LIMIT newly-synced
+emails, so the dashboard reflects finished transactions in near real time
+instead of raw, unextracted ones. Kept small since an IDLE event is usually
+just one or a few new emails, so a small cap keeps the LLM cost per trigger
+predictable without needing user confirmation each time.
 """
 
 import asyncio
 import logging
 import threading
 
+from anthropic import Anthropic
 from imapclient import IMAPClient
 
 from app.config import Settings
+from app.extract_runner import run_extraction
 from app.security import Encryptor
 from app.store import Store
 from app.sync_runner import NoGmailConnected, run_sync
 
 logger = logging.getLogger(__name__)
+
+EXTRACTION_LIMIT = 10
 
 # Gmail drops IMAP IDLE connections after ~30 minutes of inactivity; refresh
 # the IDLE command a bit before that so the connection never goes stale.
@@ -41,11 +51,13 @@ class ImapIdleListener:
         settings: Settings,
         store: Store,
         encryptor: Encryptor,
+        anthropic: Anthropic,
         loop: asyncio.AbstractEventLoop,
     ):
         self._settings = settings
         self._store = store
         self._encryptor = encryptor
+        self._anthropic = anthropic
         self._loop = loop
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -112,5 +124,13 @@ class ImapIdleListener:
             logger.info("imap idle: sync completed: %s", result)
         except NoGmailConnected:
             logger.info("imap idle: sync skipped, no Gmail account connected")
+            return
         except Exception:
             logger.exception("imap idle: sync failed")
+            return
+
+        try:
+            extraction_result = await run_extraction(self._store, self._anthropic, limit=EXTRACTION_LIMIT)
+            logger.info("imap idle: extraction completed: %s", extraction_result)
+        except Exception:
+            logger.exception("imap idle: extraction failed")
