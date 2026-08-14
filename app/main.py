@@ -274,6 +274,66 @@ async def api_set_is_transfer(message_id: str, body: SetTransferRequest):
     return {"status": "ok"}
 
 
+class TransactionInput(BaseModel):
+    date: date | None
+    merchant: str | None
+    amount: float | None
+    currency: str = "IDR"
+    category: str | None
+    payment_method: str | None
+    is_transfer: bool = False
+
+
+@app.post("/api/transactions")
+async def api_create_transaction(body: TransactionInput):
+    """Add a transaction by hand from the dashboard (no underlying email).
+    Immediately included in every aggregate (extracted_at is set right
+    away)."""
+    message_id = await app.state.store.create_manual_transaction(
+        date=body.date,
+        merchant=body.merchant,
+        amount=body.amount,
+        currency=body.currency,
+        category=body.category,
+        payment_method=body.payment_method,
+        is_transfer=body.is_transfer,
+    )
+    return {"message_id": message_id}
+
+
+@app.put("/api/transactions/{message_id}")
+async def api_update_transaction(message_id: str, body: TransactionInput):
+    """Edit a transaction's fields — allowed for both manual and
+    email-derived rows, so a wrong LLM guess (merchant/amount/category/...)
+    can be corrected by hand. The raw email fields are never editable
+    through this route."""
+    updated = await app.state.store.update_transaction(
+        message_id,
+        date=body.date,
+        merchant=body.merchant,
+        amount=body.amount,
+        currency=body.currency,
+        category=body.category,
+        payment_method=body.payment_method,
+        is_transfer=body.is_transfer,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="transaction not found")
+    return {"status": "ok"}
+
+
+@app.delete("/api/transactions/{message_id}")
+async def api_delete_transaction(message_id: str):
+    """Delete a transaction. For an email-derived row, this does not undo
+    the underlying email's dedup record — a future sync will not refetch or
+    recreate it, so deleting one by mistake isn't recoverable from a
+    re-sync."""
+    deleted = await app.state.store.delete_transaction(message_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="transaction not found")
+    return {"status": "ok"}
+
+
 @app.get("/api/categories")
 async def api_categories():
     """Distinct categories present in extracted transactions, for the

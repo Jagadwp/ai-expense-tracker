@@ -18,6 +18,7 @@ import TrendChart from './components/TrendChart.vue'
 import CategoryTrendChart from './components/CategoryTrendChart.vue'
 import TransactionTable from './components/TransactionTable.vue'
 import TransactionPreviewModal from './components/TransactionPreviewModal.vue'
+import TransactionFormModal from './components/TransactionFormModal.vue'
 import QaChat from './components/QaChat.vue'
 import SyncBar from './components/SyncBar.vue'
 import type {
@@ -26,6 +27,7 @@ import type {
   CategoryTrendPoint,
   Filters,
   PeriodComparison,
+  Transaction,
   TrendPoint,
 } from './types'
 
@@ -48,11 +50,23 @@ const categoryTrend = ref<CategoryTrendPoint[]>([])
 
 const loadError = ref<string | null>(null)
 const previewMessageId = ref<string | null>(null)
+const showAddModal = ref(false)
+const editingTransaction = ref<Transaction | null>(null)
 const transactionsRefreshKey = ref(0)
 
-async function onTransferUpdated() {
+async function onTransactionsChanged() {
   transactionsRefreshKey.value++
   await loadRangeDependent()
+}
+
+function onTransactionAdded() {
+  showAddModal.value = false
+  onTransactionsChanged()
+}
+
+function onTransactionEdited() {
+  editingTransaction.value = null
+  onTransactionsChanged()
 }
 
 async function loadRangeDependent() {
@@ -125,7 +139,10 @@ const hasError = computed(() => loadError.value !== null)
 
         <div class="transactions-header">
           <h2>Transactions</h2>
-          <SyncBar @synced="onTransferUpdated" />
+          <div class="transactions-actions">
+            <button class="add-btn" @click="showAddModal = true">+ Add transaction</button>
+            <SyncBar @synced="onTransactionsChanged" />
+          </div>
         </div>
 
         <TransactionTable
@@ -135,6 +152,7 @@ const hasError = computed(() => loadError.value !== null)
           :include-transfers="filters.includeTransfers"
           :refresh-key="transactionsRefreshKey"
           @preview="(id) => (previewMessageId = id)"
+          @edit="(tx) => (editingTransaction = tx)"
         />
       </template>
     </main>
@@ -143,7 +161,20 @@ const hasError = computed(() => loadError.value !== null)
       v-if="previewMessageId"
       :message-id="previewMessageId"
       @close="previewMessageId = null"
-      @transfer-updated="onTransferUpdated"
+      @changed="onTransactionsChanged"
+    />
+
+    <TransactionFormModal
+      v-if="showAddModal"
+      @saved="onTransactionAdded"
+      @close="showAddModal = false"
+    />
+
+    <TransactionFormModal
+      v-if="editingTransaction"
+      :editing="editingTransaction"
+      @saved="onTransactionEdited"
+      @close="editingTransaction = null"
     />
   </div>
 </template>
@@ -189,6 +220,28 @@ main {
 .transactions-header h2 {
   font-size: 1rem;
   font-weight: 600;
+}
+
+.transactions-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.add-btn {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.add-btn:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 .error {

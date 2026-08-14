@@ -9,6 +9,7 @@ import type {
   SyncAndExtractResult,
   SyncProgress,
   TransactionDetail,
+  TransactionInput,
   TransactionPage,
   TransactionQuery,
   TrendPoint,
@@ -99,7 +100,37 @@ export async function setIsTransfer(messageId: string, isTransfer: boolean): Pro
     body: JSON.stringify({ is_transfer: isTransfer }),
   })
   if (!res.ok) {
-    throw new Error(`mark-as-transfer failed: ${res.status}`)
+    throw new Error(await errorDetail(res))
+  }
+}
+
+export async function createTransaction(input: TransactionInput): Promise<{ message_id: string }> {
+  const res = await fetch('/api/transactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
+  }
+  return res.json()
+}
+
+export async function updateTransaction(messageId: string, input: TransactionInput): Promise<void> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(messageId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
+  }
+}
+
+export async function deleteTransaction(messageId: string): Promise<void> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(messageId)}`, { method: 'DELETE' })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
   }
 }
 

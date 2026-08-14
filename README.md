@@ -113,6 +113,13 @@ high-volume, low-complexity task; Haiku 4.5 doesn't support `effort` anyway).
 The system prompt is prompt-cached since it's identical across the whole
 batch.
 
+Both `category` and `payment_method` are fixed `Literal` enums (not free
+text) — Pydantic turns them into an `enum` constraint in the JSON schema, so
+Claude structurally cannot return a value outside the set, and the dashboard's
+manual add/edit form uses the same fixed lists. This applies going forward
+only; older `payment_method` values extracted before the enum existed
+(`"BI Fast"`, `"blu"`, ...) are left as free text, not backfilled.
+
 ### `app/main.py` — API routes
 
 | Method & path | Purpose |
@@ -129,6 +136,9 @@ batch.
 | `GET /api/transactions?date_from=&date_to=` | One page of extracted transactions in range — `{"items": [...], "total": N}`. Filters: `category`, `include_transfers`; sortable by any column via `sort_by`/`sort_dir`; paginated via `page`/`page_size` (max 100000, used as an "all rows" sentinel) |
 | `GET /api/transactions/{message_id}` | Full record (raw email fields + extracted fields) for one transaction, for the email-preview modal |
 | `PATCH /api/transactions/{message_id}/is-transfer` | Manually flag/unflag a transaction as a fund transfer, from the email-preview modal |
+| `POST /api/transactions` | Add a transaction by hand (no underlying email) — body: date, merchant, amount, currency, category, payment_method, is_transfer. Returns `{"message_id": "manual:<uuid>"}` |
+| `PUT /api/transactions/{message_id}` | Edit a transaction's fields — allowed for both manual and email-derived rows, so a wrong LLM guess can be corrected by hand. Raw email fields are never editable |
+| `DELETE /api/transactions/{message_id}` | Soft-delete a transaction (sets `deleted_at`, doesn't remove the row) — every read path excludes `deleted_at IS NOT NULL` rows |
 | `GET /api/categories` | Distinct categories present in extracted transactions |
 | `GET /api/available-months` | Months (`YYYY-MM`) with at least one extracted transaction, for the "by month" shortcut |
 | `GET /api/summary/category-totals?date_from=&date_to=` | Total spend per category in range, excluding transfers |
@@ -178,12 +188,13 @@ them for audit.
 Read-only queries (`list_transactions`, `list_available_months`,
 `category_totals`, `spend_trend`, `period_comparison`,
 `category_period_comparison`, `category_trend`, `get_transaction_detail`)
-and one write (`set_is_transfer`) live on `Store` alongside the rest of the
-app's database access, and are exposed over a REST API (see the routes
-table below) instead of being queried directly from the dashboard process.
-Every range query takes an explicit `date_from`/`date_to` range — there is
-no month-string filter. All spend aggregates exclude `is_transfer = true`
-rows.
+and writes (`set_is_transfer`, `create_manual_transaction`,
+`update_transaction`, `delete_transaction`) live on `Store` alongside the
+rest of the app's database access, and are exposed over a REST API (see the
+routes table below) instead of being queried directly from the dashboard
+process. Every range query takes an explicit `date_from`/`date_to` range —
+there is no month-string filter. All spend aggregates exclude
+`is_transfer = true` and (soft-)deleted (`deleted_at IS NOT NULL`) rows.
 
 `frontend/` (Vue 3 + Vite, plain CSS — light/minimalist theme) consumes that
 API:
@@ -198,17 +209,29 @@ API:
   category-breakdown donut chart, a daily spend-trend line chart, and a
   daily spend-trend line chart per category (one line per category) — all
   recompute whenever the date range changes.
+- A "Sync now" bar above the transaction table: pick a sync window
+  (1d/7d/14d/30d/90d), run a sync + bounded extraction batch in one click,
+  see a live "Syncing X of Y" progress indicator (polling
+  `GET /api/sync-progress`), and an "Extract N more" follow-up if a backlog
+  remains — see `POST /api/sync-and-extract` above.
+- An "+ Add transaction" button opens a form modal (date/amount required,
+  category and payment method as dropdowns backed by the same fixed lists
+  `app/extraction.py` uses for LLM extraction).
 - The transaction table is paginated and self-fetching (own `page`/
   `page_size`/`sort_by`/`sort_dir` state, independent of the rest of the
   dashboard): click any column header to sort by it (toggling direction on
   a second click), choose rows-per-page (10/20/50/100/All), and page with
-  Prev/Next. Each row shows the message ID with a copy-to-clipboard button.
-  Clicking a row opens an email-preview modal: the extracted fields on the
-  left, the original raw email HTML rendered in a sandboxed `<iframe>` (no
-  scripts, no same-origin access — the email body is untrusted content) on
-  the right, and a "mark/unmark as transfer" action that PATCHes
-  `is_transfer` and refreshes both the table and the rest of the dashboard
-  (every spend aggregate depends on that flag).
+  Prev/Next. A "No." column numbers rows sequentially across pages. Each row
+  has an edit icon that opens the add/edit form pre-filled, and clicking the
+  row itself opens a preview modal: the extracted fields (plus the message
+  ID with a copy-to-clipboard button), the original raw email HTML rendered
+  in a sandboxed `<iframe>` (no scripts, no same-origin access — the email
+  body is untrusted content, and the iframe is skipped entirely for
+  manually-added transactions or emails with no captured body), a
+  "mark/unmark as transfer" action, and Edit/Delete actions. Any transaction
+  — manual or email-derived — can be edited (correcting a wrong LLM guess)
+  or deleted (soft delete; the raw email fields are never editable). All of
+  these refresh both the table and the rest of the dashboard.
 
 ### `app/qa_agent.py` — Q&A agent (M6, text-to-SQL)
 `POST /api/qa/ask` lets the dashboard ask a natural-language question about
@@ -242,6 +265,10 @@ browser memory, nothing is persisted server-side.
 - `002_sender_filters.sql` — configurable sender allowlist (no CRUD API yet;
   rows are managed by hand via `psql`)
 - `003_add_is_transfer.sql` — `transactions.is_transfer` boolean flag
+- `004_add_is_manual.sql` — `transactions.is_manual` boolean flag, for
+  transactions added by hand from the dashboard
+- `005_soft_delete_transactions.sql` — `transactions.deleted_at`, for
+  soft-deleting a transaction from the dashboard
 
 ### Tests (`app/tests/`)
 Unit tests for `security.py` and `store.py`, run against a real database
@@ -292,6 +319,8 @@ Download the OAuth client's JSON from Google Cloud Console and save it as
 psql "$DATABASE_URL" -f migrations/001_epic1.sql
 psql "$DATABASE_URL" -f migrations/002_sender_filters.sql
 psql "$DATABASE_URL" -f migrations/003_add_is_transfer.sql
+psql "$DATABASE_URL" -f migrations/004_add_is_manual.sql
+psql "$DATABASE_URL" -f migrations/005_soft_delete_transactions.sql
 ```
 
 ### 6. Add at least one sender to `sender_filters`

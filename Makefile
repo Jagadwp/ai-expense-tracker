@@ -1,4 +1,4 @@
-.PHONY: install api frontend dev migrate test typecheck genkey
+.PHONY: install api frontend dev kill migrate test typecheck genkey
 
 # Install backend (venv) and frontend (npm) dependencies.
 install:
@@ -21,11 +21,20 @@ dev:
 	(cd frontend && npm run dev) & \
 	wait
 
+# Kill anything still listening on the backend (8080) or frontend (5173)
+# ports — for when `make dev` was interrupted without cleaning up (e.g. the
+# terminal was closed instead of Ctrl+C).
+kill:
+	-lsof -ti :8080 | xargs kill -9
+	-lsof -ti :5173 | xargs kill -9
+
 # Apply all database migrations in order.
 migrate:
 	psql "$$DATABASE_URL" -f migrations/001_epic1.sql
 	psql "$$DATABASE_URL" -f migrations/002_sender_filters.sql
 	psql "$$DATABASE_URL" -f migrations/003_add_is_transfer.sql
+	psql "$$DATABASE_URL" -f migrations/004_add_is_manual.sql
+	psql "$$DATABASE_URL" -f migrations/005_soft_delete_transactions.sql
 
 # Run backend tests.
 test:

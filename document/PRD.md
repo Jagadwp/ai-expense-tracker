@@ -1,9 +1,29 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.2
+- **Version:** 4.4
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-13
+- **Last updated:** 2026-08-14
+
+> Changelog from v4.3: `payment_method` is now a fixed enum (Cash, QRIS,
+> Debit Card, Credit Card, Bank Transfer, Virtual Account, GoPay, OVO, Dana,
+> ShopeePay, LinkAja, Other) instead of free text, both for LLM extraction
+> (FR-08) and the dashboard's manual add/edit form — same fixed vocabulary on
+> both paths instead of near-duplicate free-text values ("QRIS" vs "Bank
+> Transfer" vs "BI Fast" vs "BI-FAST"). Applies going forward only; existing
+> free-text values in the database are left as-is, not backfilled.
+
+> Changelog from v4.2: added manual transaction CRUD to the dashboard — an
+> "Add transaction" modal, an edit icon directly in the transaction table row
+> (no need to open the preview modal first), and delete from the
+> preview modal. Editing is allowed on any transaction (manual or
+> email-derived), so a wrong LLM guess can be corrected by hand; the raw
+> email fields stay read-only always. Delete is a **soft delete**
+> (`transactions.deleted_at`) rather than a hard `DELETE` — a hard delete on
+> an email-derived row would be unrecoverable, since `processed_emails`
+> already marks the underlying email as processed and a re-sync would never
+> bring it back. Every read path (dashboard queries, the Q&A agent) excludes
+> soft-deleted rows.
 
 > Changelog from v4.1: added a manual **"Sync now"** dashboard action
 > (`POST /api/sync-and-extract`) that runs a sync then one bounded
@@ -150,6 +170,11 @@ transaction email data, to support marketing/portfolio use.
   progress indicator; a bounded "extract more" follow-up is offered instead
   of looping automatically when a backlog remains, since extraction cost is
   real and user-tracked.
+- **FR-20** The dashboard supports manual transaction CRUD: add a transaction
+  by hand, edit any transaction's fields (manual or email-derived — never
+  the raw email fields), and delete. Delete is a soft delete
+  (`deleted_at`), not a hard `DELETE` — every read path (including the Q&A
+  agent) excludes soft-deleted rows.
 - **FR-06** A single email failure must not stop the pipeline.
 
 ### 4.2 LLM extraction
@@ -163,7 +188,7 @@ transaction email data, to support marketing/portfolio use.
     "amount": "number",
     "currency": "IDR",
     "category": "food|transport|shopping|bills|entertainment|other",
-    "payment_method": "string|null",
+    "payment_method": "Cash|QRIS|Debit Card|Credit Card|Bank Transfer|Virtual Account|GoPay|OVO|Dana|ShopeePay|LinkAja|Other|null",
     "is_transaction": "boolean",
     "confidence": "number (0.0 - 1.0)"
   }

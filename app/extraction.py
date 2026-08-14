@@ -23,6 +23,25 @@ CONFIDENCE_THRESHOLD = 0.7
 
 Category = Literal["food", "transport", "shopping", "bills", "entertainment", "other"]
 
+# Mirrors the frontend's payment-method dropdown (TransactionFormModal.vue) —
+# same fixed vocabulary for LLM-extracted and manually-entered transactions,
+# instead of free text that ends up as near-duplicate values ("QRIS" vs
+# "Bank Transfer" vs "BI Fast" vs "BI-FAST", "Cash" vs "cash", ...).
+PaymentMethod = Literal[
+    "Cash",
+    "QRIS",
+    "Debit Card",
+    "Credit Card",
+    "Bank Transfer",
+    "Virtual Account",
+    "GoPay",
+    "OVO",
+    "Dana",
+    "ShopeePay",
+    "LinkAja",
+    "Other",
+]
+
 SYSTEM_PROMPT = """You extract structured transaction data from bank/e-wallet \
 notification emails for an Indonesian expense tracker. Senders include BSI \
 (bank), OVO (e-wallet), blu by BCA digital (bank), and Shopee (marketplace).
@@ -43,6 +62,12 @@ method happens to be a bank transfer.
 - currency: always "IDR" for these senders.
 - category: your best guess from the fixed set given the merchant and \
 context. If is_transfer is true, this can still be your best guess or "other".
+- payment_method: your best guess from the fixed set based on evidence in \
+the email (a QRIS code/mention, bank transfer reference, e-wallet name, \
+card type, etc.), even if the email uses a different specific product name \
+(e.g. "blu", "BYOND by BSI" → "Bank Transfer" or "Debit Card", whichever \
+fits the evidence). Use "Other" if nothing in the fixed set fits, or None if \
+there's no evidence at all of how it was paid.
 - confidence: your genuine confidence (0.0-1.0) that the extracted fields are \
 correct. Use a low value when the email is ambiguous or the format is \
 unfamiliar — do not default to a high score."""
@@ -60,7 +85,7 @@ class ExtractionResult(BaseModel):
     amount: float | None = None
     currency: str = "IDR"
     category: Category | None = None
-    payment_method: str | None = None
+    payment_method: PaymentMethod | None = None
     confidence: float
 
 

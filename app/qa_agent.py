@@ -32,15 +32,20 @@ this when the user asks for an "id", "transaction id", or similar.
 - merchant (text): merchant or recipient name
 - amount (numeric): amount in IDR
 - category (text): one of food, transport, shopping, bills, entertainment, other
-- payment_method (text)
+- payment_method (text): one of Cash, QRIS, Debit Card, Credit Card, Bank \
+Transfer, Virtual Account, GoPay, OVO, Dana, ShopeePay, LinkAja, Other — for \
+transactions added since this became a fixed set. Older rows may still hold \
+free-text values (e.g. "BI Fast", "blu") since this wasn't backfilled.
 - is_transfer (boolean): true means a fund transfer/movement, NOT a real
   expense. Exclude is_transfer = true from spend totals unless the question
   specifically asks about transfers.
 - confidence (numeric), extracted_at (timestamptz): a row is a valid,
   extracted transaction only when extracted_at IS NOT NULL.
+- deleted_at (timestamptz): non-NULL means the user deleted this transaction
+  from the dashboard. Always exclude these.
 
-Always filter WHERE extracted_at IS NOT NULL. Exclude is_transfer = true
-unless the question explicitly asks about transfers."""
+Always filter WHERE extracted_at IS NOT NULL AND deleted_at IS NULL. Exclude
+is_transfer = true unless the question explicitly asks about transfers."""
 
 SQL_SYSTEM_PROMPT = f"""You translate natural-language questions about a \
 personal expense tracker into a single read-only PostgreSQL query.

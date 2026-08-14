@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   preview: [messageId: string]
+  edit: [tx: Transaction]
 }>()
 
 const COLUMNS: { key: SortColumn; label: string; defaultDir: SortDir }[] = [
@@ -36,7 +37,6 @@ const sortBy = ref<SortColumn>('date')
 const sortDir = ref<SortDir>('desc')
 const loading = ref(false)
 const loadError = ref<string | null>(null)
-const copiedId = ref<string | null>(null)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
@@ -98,14 +98,6 @@ function onPageSizeChange(value: string) {
   load()
 }
 
-async function copyId(messageId: string) {
-  await navigator.clipboard.writeText(messageId)
-  copiedId.value = messageId
-  setTimeout(() => {
-    if (copiedId.value === messageId) copiedId.value = null
-  }, 1200)
-}
-
 function formatRp(value: number | null): string {
   if (value === null) return ''
   return `Rp ${Math.round(value).toLocaleString('id-ID')}`
@@ -129,7 +121,8 @@ function formatDate(value: string | null): string {
       <table>
         <thead>
           <tr>
-            <th>ID</th>
+            <th>No.</th>
+            <th></th>
             <th v-for="col in COLUMNS" :key="col.key" class="sortable" @click="sortByColumn(col)">
               {{ col.label }}
               <span v-if="sortBy === col.key" class="sort-indicator">{{ sortDir === 'asc' ? '▲' : '▼' }}</span>
@@ -137,21 +130,26 @@ function formatDate(value: string | null): string {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="tx in transactions" :key="tx.message_id" class="row" @click="emit('preview', tx.message_id)">
-            <td class="id">
-              <span class="id-text">{{ tx.message_id }}</span>
-              <button class="copy-btn" title="Copy ID" @click.stop="copyId(tx.message_id)">
-                <svg v-if="copiedId !== tx.message_id" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-                <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
+          <tr
+            v-for="(tx, index) in transactions"
+            :key="tx.message_id"
+            class="row"
+            @click="emit('preview', tx.message_id)"
+          >
+            <td class="no-col">{{ (page - 1) * pageSize + index + 1 }}</td>
+            <td class="edit-col">
+              <button class="edit-btn" title="Edit transaction" @click.stop="emit('edit', tx)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
                 </svg>
               </button>
             </td>
             <td>{{ formatDate(tx.date) }}</td>
-            <td>{{ tx.merchant ?? '' }}</td>
+            <td>
+              {{ tx.merchant ?? '' }}
+              <span v-if="tx.is_manual" class="badge manual">manual</span>
+            </td>
             <td><span v-if="tx.category" class="badge">{{ tx.category }}</span></td>
             <td class="amount">{{ formatRp(tx.amount) }}</td>
             <td>{{ tx.payment_method ?? '' }}</td>
@@ -239,17 +237,17 @@ th.sortable:hover {
   color: var(--accent);
 }
 
-.id {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
+.no-col {
+  width: 1%;
   color: var(--text-secondary);
+  font-size: 0.8rem;
 }
 
-.copy-btn {
-  flex-shrink: 0;
+.edit-col {
+  width: 1%;
+}
+
+.edit-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -257,11 +255,11 @@ th.sortable:hover {
   background: var(--bg);
   color: var(--text-secondary);
   border-radius: 6px;
-  padding: 0.25rem;
+  padding: 0.35rem;
   line-height: 0;
 }
 
-.copy-btn:hover {
+.edit-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -286,6 +284,12 @@ th.sortable:hover {
   padding: 0.15rem 0.6rem;
   font-size: 0.75rem;
   font-weight: 500;
+}
+
+.badge.manual {
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
 }
 
 .empty,

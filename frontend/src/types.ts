@@ -6,12 +6,23 @@ export interface Transaction {
   amount: number | null
   payment_method: string | null
   is_transfer: boolean
+  is_manual: boolean
 }
 
 export interface TransactionDetail extends Transaction {
   raw_subject: string | null
   raw_from: string | null
   raw_body: string | null
+}
+
+export interface TransactionInput {
+  date: string | null
+  merchant: string | null
+  amount: number | null
+  currency: string
+  category: string | null
+  payment_method: string | null
+  is_transfer: boolean
 }
 
 export interface CategoryTotal {

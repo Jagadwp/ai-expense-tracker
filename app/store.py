@@ -92,6 +92,7 @@ class Store:
                 (user_id,),
             )
             row = await cur.fetchone()
+        await self._conn.commit()
 
         if row is None:
             raise NotFoundError(f"no token for user_id={user_id!r}")
@@ -134,6 +135,7 @@ class Store:
                 "SELECT email_address FROM sender_filters WHERE active = true"
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
         return [row[0] for row in rows]
 
     # ------------------------------------------------------------------
@@ -149,6 +151,7 @@ class Store:
                 (message_id,),
             )
             row = await cur.fetchone()
+        await self._conn.commit()
         return row is not None
 
     async def mark_processed(self, message_id: str) -> None:
@@ -201,6 +204,7 @@ class Store:
             SELECT message_id, raw_subject, raw_from, raw_body
             FROM transactions
             WHERE extracted_at IS NULL
+              AND deleted_at IS NULL
               AND message_id NOT IN (SELECT message_id FROM flagged_emails)
         """
         params: tuple = ()
@@ -211,6 +215,7 @@ class Store:
         async with self._conn.cursor() as cur:
             await cur.execute(query, params)
             rows = await cur.fetchall()
+        await self._conn.commit()
         return [
             RawTransaction(
                 message_id=row[0], raw_subject=row[1], raw_from=row[2], raw_body=row[3]
@@ -376,7 +381,7 @@ class Store:
         order_column = self._SORT_COLUMNS.get(sort_by, "date")
         order_dir = "ASC" if sort_dir == "asc" else "DESC"
 
-        conditions = ["extracted_at IS NOT NULL", "date >= %s", "date < %s"]
+        conditions = ["extracted_at IS NOT NULL", "deleted_at IS NULL", "date >= %s", "date < %s"]
         params: list = [date_from, date_to + timedelta(days=1)]
         if category:
             conditions.append("category = %s")
@@ -390,7 +395,7 @@ class Store:
             total = (await cur.fetchone())[0]
 
         query = f"""
-            SELECT message_id, date, merchant, category, amount, payment_method, is_transfer
+            SELECT message_id, date, merchant, category, amount, payment_method, is_transfer, is_manual
             FROM transactions
             WHERE {where_clause}
             ORDER BY {order_column} {order_dir} NULLS LAST
@@ -399,6 +404,7 @@ class Store:
         async with self._conn.cursor() as cur:
             await cur.execute(query, [*params, page_size, (page - 1) * page_size])
             rows = await cur.fetchall()
+        await self._conn.commit()
 
         items = [
             {
@@ -409,6 +415,7 @@ class Store:
                 "amount": float(row[4]) if row[4] is not None else None,
                 "payment_method": row[5],
                 "is_transfer": row[6],
+                "is_manual": row[7],
             }
             for row in rows
         ]
@@ -417,18 +424,20 @@ class Store:
     async def get_transaction_detail(self, message_id: str) -> dict | None:
         """Return the full record (raw email fields + extracted fields) for
         one transaction, for the dashboard's email-preview modal. Returns
-        None if no transaction has this message_id."""
+        None if no transaction has this message_id, or if it's been
+        (soft-)deleted."""
         async with self._conn.cursor() as cur:
             await cur.execute(
                 """
                 SELECT message_id, raw_subject, raw_from, raw_body, date, merchant,
-                       category, amount, payment_method, is_transfer
+                       category, amount, payment_method, is_transfer, is_manual
                 FROM transactions
-                WHERE message_id = %s
+                WHERE message_id = %s AND deleted_at IS NULL
                 """,
                 (message_id,),
             )
             row = await cur.fetchone()
+        await self._conn.commit()
 
         if row is None:
             return None
@@ -444,6 +453,7 @@ class Store:
             "amount": float(row[7]) if row[7] is not None else None,
             "payment_method": row[8],
             "is_transfer": row[9],
+            "is_manual": row[10],
         }
 
     async def set_is_transfer(self, message_id: str, is_transfer: bool) -> None:
@@ -456,6 +466,91 @@ class Store:
             )
         await self._conn.commit()
 
+    # ------------------------------------------------------------------
+    # Manual transaction CRUD — dashboard "Add transaction" / edit / delete.
+    # Editing is allowed on any transaction (manual or email-derived): a
+    # human correcting a wrong LLM guess is a real, recurring need. The raw
+    # email fields (subject/from/body) are never editable — they're the
+    # historical record of what Gmail actually sent.
+    # ------------------------------------------------------------------
+
+    async def create_manual_transaction(
+        self,
+        date: date | None,
+        merchant: str | None,
+        amount: float | None,
+        currency: str,
+        category: str | None,
+        payment_method: str | None,
+        is_transfer: bool,
+    ) -> str:
+        """Insert a manually-entered transaction and return its synthesized
+        message_id. There's no real Gmail message behind it, so a synthetic
+        id (manual:<uuid>) fills the NOT NULL UNIQUE message_id column
+        without risking a collision with a real one. extracted_at is set to
+        now() so it's included in the dashboard's aggregates immediately, and
+        confidence stays NULL — it isn't an LLM guess."""
+        message_id = f"manual:{uuid.uuid4()}"
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO transactions
+                    (message_id, date, merchant, amount, currency, category,
+                     payment_method, is_transfer, is_manual, extracted_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, true, now())
+                """,
+                (message_id, date, merchant, amount, currency, category, payment_method, is_transfer),
+            )
+        await self._conn.commit()
+        return message_id
+
+    async def update_transaction(
+        self,
+        message_id: str,
+        date: date | None,
+        merchant: str | None,
+        amount: float | None,
+        currency: str,
+        category: str | None,
+        payment_method: str | None,
+        is_transfer: bool,
+    ) -> bool:
+        """Overwrite a transaction's editable fields. Returns False if no
+        (non-deleted) transaction has this message_id (caller should 404)."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE transactions
+                SET date = %s, merchant = %s, amount = %s, currency = %s,
+                    category = %s, payment_method = %s, is_transfer = %s
+                WHERE message_id = %s AND deleted_at IS NULL
+                """,
+                (date, merchant, amount, currency, category, payment_method, is_transfer, message_id),
+            )
+            updated = cur.rowcount > 0
+        await self._conn.commit()
+        return updated
+
+    async def delete_transaction(self, message_id: str) -> bool:
+        """Soft-delete a transaction by setting deleted_at, rather than
+        removing the row. Returns False if no (already non-deleted)
+        transaction has this message_id (caller should 404).
+
+        A hard DELETE on an email-derived row would be unrecoverable —
+        processed_emails still marks the underlying email as processed, so a
+        future sync would never refetch or recreate it. Soft-deleting means
+        an accidental delete could still be undone by hand (UPDATE
+        transactions SET deleted_at = NULL ...) instead of being gone for
+        good."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE transactions SET deleted_at = now() WHERE message_id = %s AND deleted_at IS NULL",
+                (message_id,),
+            )
+            deleted = cur.rowcount > 0
+        await self._conn.commit()
+        return deleted
+
     async def list_categories(self) -> list[str]:
         """Return the distinct categories present in extracted transactions,
         for populating a filter dropdown. Not scoped to a date range — the
@@ -466,11 +561,12 @@ class Store:
             await cur.execute(
                 """
                 SELECT DISTINCT category FROM transactions
-                WHERE extracted_at IS NOT NULL AND category IS NOT NULL
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND category IS NOT NULL
                 ORDER BY category
                 """
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
         return [row[0] for row in rows]
 
     async def list_available_months(self) -> list[str]:
@@ -482,11 +578,12 @@ class Store:
                 """
                 SELECT DISTINCT to_char(date, 'YYYY-MM') AS month
                 FROM transactions
-                WHERE extracted_at IS NOT NULL AND date IS NOT NULL
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND date IS NOT NULL
                 ORDER BY month DESC
                 """
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
         return [row[0] for row in rows]
 
     async def category_totals(self, date_from: date, date_to: date) -> list[dict]:
@@ -497,7 +594,7 @@ class Store:
         query = """
             SELECT category, SUM(amount) AS total
             FROM transactions
-            WHERE extracted_at IS NOT NULL AND is_transfer = false
+            WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND is_transfer = false
               AND date >= %s AND date < %s
             GROUP BY category
             ORDER BY total DESC
@@ -505,6 +602,7 @@ class Store:
         async with self._conn.cursor() as cur:
             await cur.execute(query, (date_from, date_to + timedelta(days=1)))
             rows = await cur.fetchall()
+        await self._conn.commit()
 
         return [{"category": row[0], "total": float(row[1])} for row in rows]
 
@@ -518,7 +616,7 @@ class Store:
                 """
                 SELECT date_trunc('day', date) AS day, SUM(amount) AS total
                 FROM transactions
-                WHERE extracted_at IS NOT NULL AND is_transfer = false
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND is_transfer = false
                   AND date >= %s AND date < %s
                 GROUP BY day
                 ORDER BY day
@@ -526,6 +624,7 @@ class Store:
                 (date_from, date_to + timedelta(days=1)),
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
 
         return [{"date": row[0].date().isoformat(), "total": float(row[1])} for row in rows]
 
@@ -546,7 +645,7 @@ class Store:
                     SUM(amount) FILTER (WHERE date >= %(from)s AND date < %(to)s) AS current_total,
                     SUM(amount) FILTER (WHERE date >= %(prev_from)s AND date < %(prev_to)s) AS previous_total
                 FROM transactions
-                WHERE extracted_at IS NOT NULL AND is_transfer = false
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND is_transfer = false
                 """,
                 {
                     "from": date_from,
@@ -556,6 +655,7 @@ class Store:
                 },
             )
             row = await cur.fetchone()
+        await self._conn.commit()
 
         return {
             "current_total": float(row[0]) if row[0] is not None else 0.0,
@@ -582,7 +682,7 @@ class Store:
                     SUM(amount) FILTER (WHERE date >= %(from)s AND date < %(to)s) AS current_total,
                     SUM(amount) FILTER (WHERE date >= %(prev_from)s AND date < %(prev_to)s) AS previous_total
                 FROM transactions
-                WHERE extracted_at IS NOT NULL AND is_transfer = false AND category IS NOT NULL
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND is_transfer = false AND category IS NOT NULL
                   AND date >= %(prev_from)s AND date < %(to)s
                 GROUP BY category
                 ORDER BY current_total DESC NULLS LAST
@@ -595,6 +695,7 @@ class Store:
                 },
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
 
         return [
             {
@@ -616,7 +717,7 @@ class Store:
                 """
                 SELECT date_trunc('day', date) AS day, category, SUM(amount) AS total
                 FROM transactions
-                WHERE extracted_at IS NOT NULL AND is_transfer = false AND category IS NOT NULL
+                WHERE extracted_at IS NOT NULL AND deleted_at IS NULL AND is_transfer = false AND category IS NOT NULL
                   AND date >= %s AND date < %s
                 GROUP BY day, category
                 ORDER BY day
@@ -624,6 +725,7 @@ class Store:
                 (date_from, date_to + timedelta(days=1)),
             )
             rows = await cur.fetchall()
+        await self._conn.commit()
 
         return [
             {"date": row[0].date().isoformat(), "category": row[1], "total": float(row[2])}
@@ -651,5 +753,6 @@ class Store:
             await cur.execute(sql)
             rows = await cur.fetchall()
             columns = [desc.name for desc in cur.description]
+        await self._conn.commit()
 
         return [{col: to_jsonable(val) for col, val in zip(columns, row)} for row in rows]
