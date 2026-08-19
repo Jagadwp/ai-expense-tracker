@@ -355,6 +355,17 @@ async def api_category_totals(date_from: date, date_to: date):
     return await app.state.store.category_totals(date_from=date_from, date_to=date_to)
 
 
+@app.get("/api/summary/category-totals-today")
+async def api_category_totals_today():
+    """Total spend per category for today only, excluding transfers.
+
+    Always today by the server's clock — independent of the dashboard's
+    date-range filter, so it doesn't shift when the user picks a different
+    range."""
+    today = date.today()
+    return await app.state.store.category_totals(date_from=today, date_to=today)
+
+
 @app.get("/api/summary/trend")
 async def api_spend_trend(date_from: date, date_to: date):
     """Total spend per day within [date_from, date_to], excluding

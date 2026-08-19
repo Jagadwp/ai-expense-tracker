@@ -5,12 +5,14 @@ import {
   fetchCategories,
   fetchCategoryPeriodComparison,
   fetchCategoryTotals,
+  fetchCategoryTotalsToday,
   fetchCategoryTrend,
   fetchPeriodComparison,
   fetchSpendTrend,
 } from './api'
 import { monthToDateRange } from './dateRange'
 import FilterBar from './components/FilterBar.vue'
+import TodayCategoryTotals from './components/TodayCategoryTotals.vue'
 import PeriodComparisonMetrics from './components/PeriodComparisonMetrics.vue'
 import CategoryPeriodMetrics from './components/CategoryPeriodMetrics.vue'
 import CategoryChart from './components/CategoryChart.vue'
@@ -42,6 +44,7 @@ const filters = ref<Filters>({
 
 const categories = ref<string[]>([])
 const availableMonths = ref<string[]>([])
+const todayCategoryTotals = ref<CategoryTotal[]>([])
 const categoryTotals = ref<CategoryTotal[]>([])
 const spendTrend = ref<TrendPoint[]>([])
 const comparison = ref<PeriodComparison>({ current_total: 0, previous_total: 0 })
@@ -56,7 +59,11 @@ const transactionsRefreshKey = ref(0)
 
 async function onTransactionsChanged() {
   transactionsRefreshKey.value++
-  await loadRangeDependent()
+  await Promise.all([loadRangeDependent(), loadToday()])
+}
+
+async function loadToday() {
+  todayCategoryTotals.value = await fetchCategoryTotalsToday()
 }
 
 function onTransactionAdded() {
@@ -88,7 +95,7 @@ async function loadAll() {
   try {
     loadError.value = null
     ;[categories.value, availableMonths.value] = await Promise.all([fetchCategories(), fetchAvailableMonths()])
-    await loadRangeDependent()
+    await Promise.all([loadRangeDependent(), loadToday()])
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
   }
@@ -119,6 +126,8 @@ const hasError = computed(() => loadError.value !== null)
     </header>
 
     <main>
+      <TodayCategoryTotals :totals="todayCategoryTotals" />
+
       <QaChat />
 
       <FilterBar :categories="categories" :available-months="availableMonths" :filters="filters" @update:filters="(f) => (filters = f)" />

@@ -71,6 +71,10 @@ export function fetchCategoryTotals(range: Pick<Filters, 'dateFrom' | 'dateTo'>)
   return getJson(`/api/summary/category-totals?${rangeParams(range)}`)
 }
 
+export function fetchCategoryTotalsToday(): Promise<CategoryTotal[]> {
+  return getJson('/api/summary/category-totals-today')
+}
+
 export function fetchSpendTrend(range: Pick<Filters, 'dateFrom' | 'dateTo'>): Promise<TrendPoint[]> {
   return getJson(`/api/summary/trend?${rangeParams(range)}`)
 }
