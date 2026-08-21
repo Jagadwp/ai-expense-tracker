@@ -20,7 +20,7 @@ real Gmail account.**
 | M4 — LLM extraction (Claude Haiku 4.5) | ✅ Done |
 | M5 — Dashboard (Vue SPA + REST API) | ✅ Done |
 | M6 — Q&A agent (text-to-SQL, Claude Sonnet 5) | Agent working; eval set not built yet |
-| M7 — Alerts, deploy | Not started |
+| M7 — Alerts, deploy | Deploy done (Railway); email alerts not started |
 
 **M5 was originally built with Streamlit, then swapped to a Vue 3 SPA** after
 a native crash in Streamlit's pyarrow dependency (`SIGSEGV` in `mimalloc`,
@@ -30,9 +30,6 @@ full-stack capability than a data-app-style dashboard.
 
 ## To do
 
-- **Manual transaction entry** — modal to add a transaction by hand, plus
-  view/edit/delete for existing ones (planned together, separate commit from
-  "Sync now").
 - **Retry flagged emails** — small UI/endpoint to unflag a failed
   `flagged_emails` row and re-queue it for sync/extraction, instead of the
   current manual-`psql` workaround. Needed because a failed sync or
@@ -42,16 +39,18 @@ full-stack capability than a data-app-style dashboard.
   error rows) in the dashboard instead of requiring direct DB access.
 - **M6 eval set** — a fixed set of test questions/expected answers for the
   Q&A agent, to catch regressions in `qa_agent.py` prompts.
-- **M7 — alerts & deploy** — not started. Deploy target still undecided
-  (PaaS like Railway/Render vs. a VPS + Docker + Caddy); key constraint is
-  the always-on IMAP IDLE listener + scheduler ruling out free-tier
-  auto-sleep platforms.
-- **Publish Google OAuth app to "Production"** — while the OAuth client is
-  in "Testing" publishing status, refresh tokens expire after ~7 days
-  (`invalid_grant: Token has been expired or revoked.`), requiring a manual
-  `GET /auth/google` re-consent. `refresh_if_expired()` only handles normal
-  access-token expiry, not an invalidated refresh token. Needed before
-  deploy so the app doesn't silently stop syncing every week.
+- **M7 — email alerts** — threshold-based spend alerts via Resend, still not
+  built. (Deploy, the other half of M7, is done — see "Deployment" below.)
+
+**Done, no longer tracked here:**
+- Manual transaction entry (add/edit/delete, soft delete) — see
+  "Dashboard (M5)" below.
+- Deployed to production on Railway — see "Deployment (Railway)" below.
+- Published the Google OAuth client to "In production" (fixes the ~7-day
+  refresh-token expiry `invalid_grant` issue below) — not submitted for
+  Google's verification review, which is fine for a single-user tool on the
+  `gmail.readonly` sensitive (not restricted) scope; the cost is a one-time
+  "unverified app" warning during consent.
 
 ## What's built so far
 
@@ -107,11 +106,19 @@ on any connection error.
 
 ### `app/extraction.py` — LLM extraction (M4)
 `extract_transaction()`: sends one email's subject/sender/body to
-**Claude Haiku 4.5** via `client.messages.parse()` with a Pydantic schema
-(`ExtractionResult`) for structured output — no thinking, no `effort` (a
-high-volume, low-complexity task; Haiku 4.5 doesn't support `effort` anyway).
-The system prompt is prompt-cached since it's identical across the whole
-batch.
+**Claude Haiku 4.5** via `langchain-anthropic`'s `ChatAnthropic`, bound to
+the `ExtractionResult` Pydantic schema via
+`with_structured_output(..., method="json_schema")` — no thinking, no
+`effort` (a high-volume, low-complexity task; Haiku 4.5 doesn't support
+`effort` anyway). The system prompt is prompt-cached since it's identical
+across the whole batch.
+
+Ported from the raw `anthropic` SDK to `langchain-anthropic` as a
+provider-abstraction learning exercise. `method="json_schema"` matters:
+LangChain's default (`method="function_calling"`, forced tool calling) is
+documented as unreliable when `thinking` is enabled — the Q&A agent below
+uses `thinking`, so it needs this non-default method; extraction doesn't
+use `thinking` at all, but uses the same method for consistency.
 
 Both `category` and `payment_method` are fixed `Literal` enums (not free
 text) — Pydantic turns them into an `enum` constraint in the JSON schema, so
@@ -142,6 +149,7 @@ only; older `payment_method` values extracted before the enum existed
 | `GET /api/categories` | Distinct categories present in extracted transactions |
 | `GET /api/available-months` | Months (`YYYY-MM`) with at least one extracted transaction, for the "by month" shortcut |
 | `GET /api/summary/category-totals?date_from=&date_to=` | Total spend per category in range, excluding transfers |
+| `GET /api/summary/category-totals-today` | Total spend per category for today only (server's clock), excluding transfers — independent of the dashboard's date-range filter |
 | `GET /api/summary/trend?date_from=&date_to=` | Total spend per day in range, excluding transfers |
 | `GET /api/summary/period-comparison?date_from=&date_to=` | Total spend in range vs the immediately preceding period of the same length, excluding transfers |
 | `GET /api/summary/category-period-comparison?date_from=&date_to=` | Per-category breakdown of `period-comparison`, excluding transfers |
@@ -198,6 +206,10 @@ there is no month-string filter. All spend aggregates exclude
 
 `frontend/` (Vue 3 + Vite, plain CSS — light/minimalist theme) consumes that
 API:
+- A "Today's spend by category" card, pinned above everything else and
+  computed from the server's current date (`GET
+  /api/summary/category-totals-today`) — independent of the date-range
+  filter below, so it never shifts when the range changes.
 - A date-range picker: native `<input type="date">` from/to fields, quick
   presets (7D/1M/3M/6M/1Y), and a "by month" shortcut scoped to months that
   actually have data — picking a month snaps the range to that full
@@ -254,8 +266,16 @@ expense data. Two separate Claude Sonnet 5 calls, not one agentic loop:
    raw rows into a one- or two-sentence natural-language reply; told
    explicitly to say there's no data rather than guess when rows are empty.
 
-Both calls use adaptive thinking and `effort: "medium"` (FR-18). The
-frontend's `QaChat.vue` is a simple chat card (question in, answer + a
+Both calls use adaptive thinking and `effort: "medium"` (FR-18), via
+`langchain-anthropic`'s `ChatAnthropic` (ported from the raw `anthropic` SDK
+alongside `app/extraction.py` above). One quirk found by this port and
+fixed: when adaptive thinking actually engages (not the common no-op case),
+`ChatAnthropic`'s response content becomes a list of blocks (a "thinking"
+block plus a "text" block) instead of a plain string — `compose_answer()`
+checks for this and extracts just the text block, rather than assuming
+`response.content` is always a `str`.
+
+The frontend's `QaChat.vue` is a simple chat card (question in, answer + a
 collapsible "SQL used" block out) — the exchange history lives only in
 browser memory, nothing is persisted server-side.
 
@@ -370,3 +390,48 @@ proxies `/api` requests to the FastAPI backend on `http://localhost:8080`
 source venv/bin/activate
 python -m pytest app/tests/ -v
 ```
+
+## Deployment (Railway)
+
+Deployed as a **single Railway service** — one Docker image, backend and
+frontend together — plus a Railway-managed PostgreSQL service in the same
+project.
+
+- **`Dockerfile`** (multi-stage): a Node stage runs `npm ci && npm run build`
+  to produce `frontend/dist`, then a Python stage copies that build into the
+  image alongside the FastAPI app.
+- **`app/main.py`** mounts `frontend/dist` as static files (`StaticFiles`,
+  `html=True`) at `/`, added *after* every API route — so it never shadows
+  `/api/*`, `/auth/*`, or `/health`. This means one domain, one process, and
+  no production CORS configuration (frontend and API share an origin; the
+  CORS middleware in the code is dev-only, for Vite's `localhost:5173`).
+- **`railway.json`** pins the build to the Dockerfile explicitly — Railway's
+  default auto-detect builder ("Railpack") saw a Python project and picked
+  its own start command, ignoring the Dockerfile entirely without this.
+- **`GOOGLE_CREDENTIALS_JSON`** env var: Railway has no file-upload
+  mechanism, so `credentials.json`'s content can be set as this env var
+  instead, and `app/main.py`'s lifespan writes it to
+  `GOOGLE_CREDENTIALS_PATH` at startup before anything reads the file.
+  Local dev is unaffected — the file is still used directly, and this env
+  var should stay unset locally.
+- **Environment variables** needed on the app service: `DATABASE_URL`
+  (reference the Postgres service's own variable, don't hardcode it),
+  `ANTHROPIC_API_KEY`, `ENCRYPTION_KEY`, `SESSION_SECRET` (generate fresh
+  values for production, don't reuse local ones), `GOOGLE_REDIRECT_URL`
+  (the production domain's `/auth/google/callback`), `GOOGLE_CREDENTIALS_JSON`,
+  and optionally `GMAIL_IMAP_USER`/`GMAIL_IMAP_APP_PASSWORD`.
+- **Google Cloud Console**: the production callback URL must be added to
+  the OAuth client's "Authorized redirect URIs" (in addition to, not instead
+  of, the `localhost` one used for dev), or auth fails with
+  `Error 400: redirect_uri_mismatch`.
+- **Migrations**: not run automatically on deploy. After provisioning the
+  Postgres service, run `make migrate` once from a local machine against its
+  **public** connection string (enable the service's TCP Proxy under
+  Settings → Networking to get one — the default `*.railway.internal`
+  hostname only resolves inside Railway's private network, not from a local
+  machine).
+- **Google OAuth publishing status**: published to "In production" (not
+  submitted for Google's verification review) once real usage started,
+  since "Testing" status caps refresh tokens at ~7 days
+  (`invalid_grant: Token has been expired or revoked.`) — see the "To do"
+  section above for why verification itself isn't needed at this scale.

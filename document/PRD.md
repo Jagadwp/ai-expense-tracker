@@ -1,9 +1,46 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.4
+- **Version:** 4.7
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-14
+- **Last updated:** 2026-08-21
+
+> Changelog from v4.6: deployed to production on **Railway** (M7, partial —
+> alerts still not built). Single service: a multi-stage `Dockerfile` builds
+> the Vue dashboard and copies it into the FastAPI image, which serves it as
+> static files (mounted after all API routes, so nothing shadows `/api/*` or
+> `/auth/*`) — one deploy, one domain, no production CORS config needed since
+> frontend and API share an origin. Google OAuth credentials can now also
+> come from a `GOOGLE_CREDENTIALS_JSON` env var (written to
+> `credentials.json` at startup) since Railway has no file-upload mechanism;
+> local dev is unaffected. The Google OAuth client itself was published to
+> "In production" (no refresh-token expiry) but not submitted for Google's
+> verification review — acceptable for a single-user tool using only the
+> sensitive (not restricted) `gmail.readonly` scope; the cost is a one-time
+> "unverified app" warning during consent, not a functional block.
+
+> Changelog from v4.5: extraction (`app/extraction.py`) and the Q&A agent
+> (`app/qa_agent.py`) ported from the raw `anthropic` SDK to
+> `langchain-anthropic`, as a provider-abstraction learning exercise (see
+> `experiment/langchain` branch history). Verified empirically rather than
+> assumed: structured output survives the port only via
+> `with_structured_output(..., method="json_schema")` — LangChain's default
+> `method="function_calling"` is documented as unreliable when `thinking` is
+> enabled; `thinking`, `output_config.effort`, and prompt caching
+> (`cache_control`) all still work. Fixed a real bug surfaced by this
+> migration: when adaptive thinking actually engages, `ChatAnthropic`'s
+> response content becomes a list of blocks (reasoning + text) instead of a
+> plain string — `compose_answer()` now handles both shapes.
+
+> Changelog from v4.4: added a "Today's spend by category" dashboard card,
+> pinned above the rest of the dashboard and computed from the server's
+> current date (`GET /api/summary/category-totals-today`) — independent of
+> the date-range filter, so it never shifts when the user changes the range.
+> Also reworked the transaction table/preview UI: the message ID and its
+> copy button moved from the table into the preview modal, the table's ID
+> column became a sequential "No." column, and the preview modal skips the
+> raw-email `<iframe>` (and shrinks to a single column) when there's no
+> email body to show — manual transactions or emails with no captured body.
 
 > Changelog from v4.3: `payment_method` is now a fixed enum (Cash, QRIS,
 > Debit Card, Credit Card, Bank Transfer, Virtual Account, GoPay, OVO, Dana,
@@ -245,23 +282,26 @@ transaction email data, to support marketing/portfolio use.
 | Frontend          | Vue 3 + Vite                                   | Author's existing frontend skill; a real SPA demonstrates full-stack capability better than a data-app-style dashboard |
 | Database          | PostgreSQL                                    | Relational data; pgvector available if needed later |
 | Background jobs   | APScheduler                                   | In-process scheduler, no extra infrastructure |
-| LLM — extraction  | Claude Haiku 4.5 (`claude-haiku-4-5`)          | Cost-efficient for high-volume structured extraction |
-| LLM — Q&A agent   | Claude Sonnet 5 (`claude-sonnet-5`)            | Near-Opus coding/agentic quality at Sonnet cost, for text-to-SQL |
-| Email (send)      | Resend                                         | Good free tier and DX |
+| LLM — extraction  | Claude Haiku 4.5 (`claude-haiku-4-5`) via `langchain-anthropic` | Cost-efficient for high-volume structured extraction |
+| LLM — Q&A agent   | Claude Sonnet 5 (`claude-sonnet-5`) via `langchain-anthropic`   | Near-Opus coding/agentic quality at Sonnet cost, for text-to-SQL |
+| Email (send)      | Resend (not yet integrated — M7 alerts not built) | Good free tier and DX |
 | Email (read)      | Gmail API (OAuth2) + IMAP IDLE                 | Scheduled sync + real-time detection |
-| Hosting           | Docker → Railway or Render                     | Cheap/free, single-container-friendly for a portfolio |
+| Hosting           | Docker → **Railway** (deployed)                | Cheap, single-container-friendly; always-on (no auto-sleep, needed for IMAP IDLE + the 30-min scheduler) |
 | Auth              | Session-based (cookie), single user            | Simple for a single-user MVP |
 
 ---
 
 ## 7. Data model
 
-The authoritative schema lives in `migrations/001_epic1.sql` (reused unchanged
-from the original design — the schema is language-agnostic). A full,
-column-by-column explanation is in [`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md).
+The authoritative schema lives in `migrations/001_epic1.sql` plus four
+follow-on migrations (`002_sender_filters.sql`, `003_add_is_transfer.sql`,
+`004_add_is_manual.sql`, `005_soft_delete_transactions.sql`) — the original
+Epic 1 design has since grown `transactions.is_transfer`, `is_manual`, and
+`deleted_at`. A full, column-by-column explanation is in
+[`DATABASE_SCHEMA.md`](./DATABASE_SCHEMA.md).
 
-**Epic 1 tables (implemented):** `transactions`, `processed_emails`,
-`flagged_emails`, `oauth_tokens`, `sync_logs`.
+**Implemented tables:** `transactions`, `processed_emails`, `flagged_emails`,
+`oauth_tokens`, `sync_logs`, `sender_filters`.
 
 **Future-epic tables (not yet created):** `spending_limits`, `alert_logs`
 (Epic 4), `llm_call_logs` (observability, Epic 2+).
@@ -294,7 +334,7 @@ real email data that both the extraction design and the eval set can use.
 | M4 — Extraction       | LLM extraction (Haiku 4.5) designed against real email data, manual-input fallback | AI |
 | M5 — Dashboard        | Vue SPA over a REST API: transaction list, filters, charts    | AI |
 | M6 — Q&A agent        | Text-to-SQL agent (Sonnet 5) + eval set (≥85% accuracy)        | AI |
-| M7 — Alert & polish   | Threshold logic + email alert via Resend; deploy, observability, case study, demo video | Polish |
+| M7 — Alert & polish   | Threshold logic + email alert via Resend; deploy, observability, case study, demo video | Polish — **deploy done (Railway)**; alerts/eval set/case study/demo video still open |
 
 ---
 

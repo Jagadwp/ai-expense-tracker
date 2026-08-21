@@ -23,7 +23,7 @@ plain language.
 
 ## 🔗 Live Demo
 
-_TODO_
+[ai-expense-tracker-production-c5cd.up.railway.app](https://ai-expense-tracker-production-c5cd.up.railway.app)
 
 ## Features
 

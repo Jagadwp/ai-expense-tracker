@@ -1,8 +1,9 @@
 # Database Schema — AI Expense Tracker
 
 - **Database:** PostgreSQL 15+
-- **Authoritative source:** `migrations/001_epic1.sql`
-- **Last updated:** 2026-06-22
+- **Authoritative source:** `migrations/001_epic1.sql` through
+  `migrations/005_soft_delete_transactions.sql`
+- **Last updated:** 2026-08-21
 
 This document explains the Epic 1 schema column by column, the design rationale
 behind each table, and how the tables relate within the ingestion pipeline.
@@ -72,11 +73,14 @@ One row = one transaction successfully extracted from an email.
 | `merchant` | `TEXT` | e.g. "Shopee", "Indomaret" |
 | `amount` | `NUMERIC(15,2)` | transaction amount |
 | `currency` | `TEXT NOT NULL DEFAULT 'IDR'` | IDR for the MVP |
-| `category` | `TEXT` | LLM classification (enum at the LLM layer, free text in DB) |
-| `payment_method` | `TEXT` | e.g. "BSI", "OVO" |
-| `confidence` | `NUMERIC(4,3)` | extraction confidence, 0.000–1.000 |
-| `extracted_at` | `TIMESTAMPTZ` | when the LLM produced the result |
+| `category` | `TEXT` | fixed enum at the LLM/app layer (food, transport, shopping, bills, entertainment, other) — free text in the DB column, not DB-enforced |
+| `payment_method` | `TEXT` | fixed enum since v4.4 (Cash, QRIS, Debit Card, Credit Card, Bank Transfer, Virtual Account, GoPay, OVO, Dana, ShopeePay, LinkAja, Other) — again free text at the DB level; rows extracted before v4.4 may still hold older free-text values (e.g. "BI Fast") since this wasn't backfilled |
+| `confidence` | `NUMERIC(4,3)` | extraction confidence, 0.000–1.000; `NULL` for manually-added rows (not an LLM guess) |
+| `extracted_at` | `TIMESTAMPTZ` | when the LLM produced the result, or `now()` for a manual add |
 | `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | row creation time |
+| `is_transfer` | `BOOLEAN NOT NULL DEFAULT false` | *(003)* true = fund movement, not real spend; excluded from spend aggregates but still listed for audit |
+| `is_manual` | `BOOLEAN NOT NULL DEFAULT false` | *(004)* true = added by hand from the dashboard, not extracted from an email; `message_id` is a synthesized `manual:<uuid>` for these rows |
+| `deleted_at` | `TIMESTAMPTZ` | *(005)* non-`NULL` = soft-deleted from the dashboard. Every read path (dashboard queries, the Q&A agent) filters `deleted_at IS NULL` |
 
 **Indexes:** `idx_transactions_date (date DESC)`, `idx_transactions_category (category)`.
 
@@ -133,7 +137,9 @@ leaked, the token is unreadable without `ENCRYPTION_KEY`.
 ---
 
 ### 5. `sync_logs` — history & observability
-One row per sync run. Backs the `GET /sync/logs` endpoint.
+One row per sync run (manual, scheduled, or IMAP IDLE). Written by
+`app.sync_runner.run_sync()`; there's no API route exposing it yet — query
+it directly via `psql` for now.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -151,10 +157,17 @@ One row per sync run. Backs the `GET /sync/logs` endpoint.
 
 ---
 
-## River (background-job) tables
-River creates and owns its own tables (`river_job`, `river_leader`, etc.) via its
-own migration step (`river migrate`). They are **not** defined in
-`001_epic1.sql` and are added when River is wired up.
+### 6. `sender_filters` — configurable sender allowlist *(002)*
+Which email addresses `GmailSyncer` queries Gmail for (FR-02: configurable,
+not hardcoded). No CRUD API yet — rows are managed by hand via `psql`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID PK` | `gen_random_uuid()` |
+| `email_address` | `TEXT NOT NULL UNIQUE` | e.g. `noreply@ovo.co.id` |
+| `label` | `TEXT` | human-readable name, e.g. "OVO" |
+| `active` | `BOOLEAN NOT NULL DEFAULT true` | inactive rows are excluded from the sync query without deleting them |
+| `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | row creation time |
 
 ---
 
