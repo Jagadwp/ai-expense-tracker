@@ -1,10 +1,11 @@
 # AI Expense Tracker
 
-Tracking personal spending by hand is tedious — transaction notifications
+Tracking personal spending by hand is tedious: transaction notifications
 are scattered across email, manual entry is a chore, and there's no
-automated, actionable insight. **AI Expense Tracker** reads those emails
-for you: it watches your Gmail inbox, extracts the expense data with an
-LLM, and lets you explore your spending on a dashboard — or just ask it in
+automated, actionable insight. **AI Expense Tracker** solves this with a
+FastAPI + PostgreSQL backend that watches your Gmail inbox via IMAP IDLE,
+extracts each transaction with Claude Haiku 4.5, and serves it through a
+Vue dashboard, or a Claude Sonnet 5 text-to-SQL agent you can just ask in
 plain language.
 
 ## 📸 Screenshot
@@ -22,21 +23,21 @@ plain language.
 
 ## 🔗 Live Demo
 
-— _TODO_
+_TODO_
 
 ## Features
 
-- **Zero manual entry** — Gmail is synced automatically (real-time via IMAP
+- **Zero manual entry**: Gmail is synced automatically (real-time via IMAP
   IDLE, plus a 30-minute scheduled fallback) and each transaction email is
   parsed into structured data by an LLM.
-- **Ask your expenses a question** — a text-to-SQL agent (Claude Sonnet 5)
+- **Ask your expenses a question**: a text-to-SQL agent (Claude Sonnet 5)
   answers things like *"how much did I spend on food last month?"* in
   natural language.
-- **Interactive dashboard** — date-range filters, category breakdown,
+- **Interactive dashboard**: date-range filters, category breakdown,
   spend trend charts, and a sortable/paginated transaction table.
-- **Manual control when you need it** — add, edit, or (soft-)delete any
+- **Manual control when you need it**: add, edit, or (soft-)delete any
   transaction by hand; a one-click "Sync now" for on-demand syncing.
-- **Built for real inboxes** — one bad or ambiguous email never breaks the
+- **Built for real inboxes**: one bad or ambiguous email never breaks the
   pipeline (low-confidence extractions are flagged for review, not
   silently trusted).
 
@@ -83,11 +84,11 @@ variables) are in [`document/PRD.md`](document/PRD.md).
 
 This README is intentionally short. For anyone who wants the deep end:
 
-- [`document/PRD.md`](document/PRD.md) — full product spec, functional
+- [`document/PRD.md`](document/PRD.md): full product spec, functional
   requirements, and a running design-decision changelog.
-- [`README.full.md`](README.full.md) — the previous, exhaustive README:
-  every module explained, full API reference, database migrations, and
-  setup walkthrough.
+- [`README.full.md`](README.full.md): the previous, exhaustive README
+  (every module explained, full API reference, database migrations, and
+  setup walkthrough).
 
 ## Status
 
