@@ -4,9 +4,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
+
+# "Today" always means Indonesia (WIB), not the server OS's own timezone
+# (Railway defaults to UTC, 7h behind).
+JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Query, Response, status
@@ -374,10 +379,9 @@ async def api_category_totals(date_from: date, date_to: date):
 async def api_category_totals_today():
     """Total spend per category for today only, excluding transfers.
 
-    Always today by the server's clock — independent of the dashboard's
-    date-range filter, so it doesn't shift when the user picks a different
-    range."""
-    today = date.today()
+    Always today in Indonesia (WIB), independent of the dashboard's
+    date-range filter."""
+    today = datetime.now(JAKARTA_TZ).date()
     return await app.state.store.category_totals(date_from=today, date_to=today)
 
 
