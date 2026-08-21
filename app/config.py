@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     google_credentials_path: str = Field(
         default="./credentials.json", alias="GOOGLE_CREDENTIALS_PATH"
     )
+    # For hosts with no way to upload a file (e.g. Railway) — the raw
+    # contents of credentials.json, written out to google_credentials_path
+    # at startup if set (see app.main's lifespan). Local dev keeps using the
+    # file directly and leaves this unset.
+    google_credentials_json: str | None = Field(default=None, alias="GOOGLE_CREDENTIALS_JSON")
     google_redirect_url: str = Field(default="", alias="GOOGLE_REDIRECT_URL")
 
     # --- IMAP IDLE ---

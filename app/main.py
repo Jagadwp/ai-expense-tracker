@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from datetime import date
 from typing import Literal
@@ -11,6 +12,7 @@ import psycopg
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import gmail_auth
@@ -31,6 +33,12 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Hosts with no way to upload a file (e.g. Railway) set
+    # GOOGLE_CREDENTIALS_JSON instead of mounting credentials.json directly —
+    # materialize it before anything below tries to read the file.
+    if settings.google_credentials_json:
+        Path(settings.google_credentials_path).write_text(settings.google_credentials_json)
+
     # Open a single connection for startup checks; request-scoped connections
     # are added once the store layer needs them.
     app.state.db_conn = await psycopg.AsyncConnection.connect(settings.database_url)
@@ -425,3 +433,12 @@ async def api_qa_ask(body: AskRequest):
     rows = await app.state.store.run_readonly_query(sql)
     answer = compose_answer(app.state.qa_answer_llm, body.question, rows)
     return {"answer": answer, "sql": sql}
+
+
+# Serve the built Vue dashboard from the same process/origin in production
+# (see the deploy Dockerfile) — mounted last so it never shadows the API
+# routes above. Absent in local dev unless `npm run build` was run, so this
+# only activates once frontend/dist actually exists.
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")

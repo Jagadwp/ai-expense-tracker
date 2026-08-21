@@ -1,0 +1,21 @@
+# Secrets & env — never bake into the image
+.env
+*.env.local
+credentials.json
+token.json
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Git / editor
+.git/
+.DS_Store
+.idea/
+.vscode/
