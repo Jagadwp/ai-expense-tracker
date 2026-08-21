@@ -19,8 +19,8 @@ import asyncio
 import logging
 import threading
 
-from anthropic import Anthropic
 from imapclient import IMAPClient
+from langchain_core.runnables import Runnable
 
 from app.config import Settings
 from app.extract_runner import run_extraction
@@ -51,13 +51,13 @@ class ImapIdleListener:
         settings: Settings,
         store: Store,
         encryptor: Encryptor,
-        anthropic: Anthropic,
+        extraction_llm: Runnable,
         loop: asyncio.AbstractEventLoop,
     ):
         self._settings = settings
         self._store = store
         self._encryptor = encryptor
-        self._anthropic = anthropic
+        self._extraction_llm = extraction_llm
         self._loop = loop
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -130,7 +130,7 @@ class ImapIdleListener:
             return
 
         try:
-            extraction_result = await run_extraction(self._store, self._anthropic, limit=EXTRACTION_LIMIT)
+            extraction_result = await run_extraction(self._store, self._extraction_llm, limit=EXTRACTION_LIMIT)
             logger.info("imap idle: extraction completed: %s", extraction_result)
         except Exception:
             logger.exception("imap idle: extraction failed")

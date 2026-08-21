@@ -12,8 +12,8 @@ LLM cost per run predictable without needing user confirmation each time.
 
 import logging
 
-from anthropic import Anthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from langchain_core.runnables import Runnable
 
 from app.extract_runner import run_extraction
 from app.security import Encryptor
@@ -26,7 +26,7 @@ SYNC_INTERVAL_MINUTES = 30
 EXTRACTION_LIMIT = 10
 
 
-def create_scheduler(store: Store, encryptor: Encryptor, anthropic: Anthropic) -> AsyncIOScheduler:
+def create_scheduler(store: Store, encryptor: Encryptor, extraction_llm: Runnable) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
     async def scheduled_job():
@@ -41,7 +41,7 @@ def create_scheduler(store: Store, encryptor: Encryptor, anthropic: Anthropic) -
             return
 
         try:
-            extraction_result = await run_extraction(store, anthropic, limit=EXTRACTION_LIMIT)
+            extraction_result = await run_extraction(store, extraction_llm, limit=EXTRACTION_LIMIT)
             logger.info("scheduled extraction completed: %s", extraction_result)
         except Exception:
             logger.exception("scheduled extraction failed")

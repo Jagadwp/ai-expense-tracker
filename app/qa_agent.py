@@ -12,14 +12,24 @@ Design notes:
   re-validates before execution rather than trusting model output for
   something that runs against the real database.
 - Adaptive thinking + effort="medium" per FR-18 — Sonnet 5's default
-  reasoning depth for this task. Uses messages.create() directly (not
-  .parse()) since output_config needs both `format` and `effort` set
-  together.
+  reasoning depth for this task.
+
+experiment/langchain branch: ported from the raw `anthropic` SDK to
+`langchain-anthropic`. Verified empirically (not just assumed) that
+`thinking`, `output_config.effort`, and `cache_control` prompt caching all
+still work correctly through ChatAnthropic — see the branch notes. Two
+separate ChatAnthropic instances are built (one per function) since they
+use different `max_tokens`; generate_sql()'s is additionally bound to
+SqlGenerationResult via `with_structured_output(..., method="json_schema")`
+— not the default `method="function_calling"`, which the library itself
+warns is unreliable when `thinking` is enabled (forced tool calling can
+conflict with extended reasoning).
 """
 
 import re
 
-from anthropic import Anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict
 
 MODEL = "claude-sonnet-5"
@@ -114,52 +124,61 @@ def validate_sql(sql: str) -> str:
     return stripped
 
 
-def generate_sql(client: Anthropic, question: str) -> SqlGenerationResult:
-    """Call Claude Sonnet 5 to translate a question into SQL, or decline."""
-    response = client.messages.create(
+def build_sql_llm(api_key: str):
+    """Build the LangChain Runnable used by generate_sql(), bound to
+    SqlGenerationResult via the native JSON-schema output path (see module
+    docstring for why not the default tool-calling method)."""
+    llm = ChatAnthropic(
         model=MODEL,
         max_tokens=1024,
         thinking={"type": "adaptive"},
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "schema": SqlGenerationResult.model_json_schema(),
-            },
-            "effort": "medium",
-        },
-        system=[
-            {
-                "type": "text",
-                "text": SQL_SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[{"role": "user", "content": question}],
+        output_config={"effort": "medium"},
+        api_key=api_key,
     )
-    text = next(block.text for block in response.content if block.type == "text")
-    return SqlGenerationResult.model_validate_json(text)
+    return llm.with_structured_output(SqlGenerationResult, method="json_schema")
 
 
-def compose_answer(client: Anthropic, question: str, rows: list[dict]) -> str:
-    """Call Claude Sonnet 5 to turn raw query rows into a natural-language
-    answer to the original question."""
-    response = client.messages.create(
+def build_answer_llm(api_key: str) -> ChatAnthropic:
+    """Build the plain (non-structured) LangChain chat model used by
+    compose_answer()."""
+    return ChatAnthropic(
         model=MODEL,
         max_tokens=512,
         thinking={"type": "adaptive"},
         output_config={"effort": "medium"},
-        system=[
-            {
-                "type": "text",
-                "text": ANSWER_SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"Question: {question}\n\nQuery result (JSON rows):\n{rows}",
-            }
-        ],
+        api_key=api_key,
     )
-    return next(block.text for block in response.content if block.type == "text")
+
+
+def generate_sql(llm, question: str) -> SqlGenerationResult:
+    """Call Claude Sonnet 5 (via the Runnable from build_sql_llm) to
+    translate a question into SQL, or decline."""
+    messages = [
+        SystemMessage(
+            content=[{"type": "text", "text": SQL_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+        ),
+        HumanMessage(content=question),
+    ]
+    return llm.invoke(messages)
+
+
+def compose_answer(llm: ChatAnthropic, question: str, rows: list[dict]) -> str:
+    """Call Claude Sonnet 5 (via build_answer_llm) to turn raw query rows
+    into a natural-language answer to the original question."""
+    messages = [
+        SystemMessage(
+            content=[{"type": "text", "text": ANSWER_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+        ),
+        HumanMessage(content=f"Question: {question}\n\nQuery result (JSON rows):\n{rows}"),
+    ]
+    response = llm.invoke(messages)
+
+    # response.content is a plain str only when adaptive thinking decided not
+    # to think (the common case). When it does think, content becomes a list
+    # of blocks — a "thinking" block (its reasoning, discarded) plus a "text"
+    # block (the real answer) — verified empirically on this branch; returning
+    # the raw list here would silently hand the frontend a list instead of a
+    # string whenever a harder question happens to engage real reasoning.
+    if isinstance(response.content, str):
+        return response.content
+    return "".join(block["text"] for block in response.content if block.get("type") == "text")

@@ -9,7 +9,7 @@ app.sync_runner pattern for the sync pipeline.
 import logging
 from typing import Callable
 
-from anthropic import Anthropic
+from langchain_core.runnables import Runnable
 
 from app.extraction import CONFIDENCE_THRESHOLD, extract_transaction
 from app.store import Store
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 async def run_extraction(
     store: Store,
-    anthropic: Anthropic,
+    extraction_llm: Runnable,
     limit: int | None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> dict:
@@ -48,7 +48,7 @@ async def run_extraction(
 
     for i, tx in enumerate(candidates, start=1):
         try:
-            result = extract_transaction(anthropic, tx.raw_subject, tx.raw_from, tx.raw_body)
+            result = extract_transaction(extraction_llm, tx.raw_subject, tx.raw_from, tx.raw_body)
 
             if not result.is_transaction:
                 await store.delete_non_transaction(tx.message_id)

@@ -8,7 +8,6 @@ from datetime import date
 from typing import Literal
 
 import psycopg
-from anthropic import Anthropic
 from fastapi import FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -17,8 +16,9 @@ from pydantic import BaseModel
 from app import gmail_auth
 from app.config import get_settings
 from app.extract_runner import run_extraction
+from app.extraction import build_extraction_llm
 from app.imap_idle import ImapIdleListener
-from app.qa_agent import UnsafeSqlError, compose_answer, generate_sql, validate_sql
+from app.qa_agent import UnsafeSqlError, build_answer_llm, build_sql_llm, compose_answer, generate_sql, validate_sql
 from app.scheduler import create_scheduler
 from app.security import Encryptor
 from app.store import NotFoundError, Store
@@ -36,7 +36,14 @@ async def lifespan(app: FastAPI):
     app.state.db_conn = await psycopg.AsyncConnection.connect(settings.database_url)
     app.state.store = Store(app.state.db_conn)
     app.state.encryptor = Encryptor(settings.encryption_key)
-    app.state.anthropic = Anthropic(api_key=settings.anthropic_api_key)
+
+    # experiment/langchain: LangChain Runnables replace the raw Anthropic
+    # client. One model per distinct use (they differ in max_tokens/thinking/
+    # structured-output binding) rather than one generic client reused
+    # everywhere — see app/extraction.py and app/qa_agent.py.
+    app.state.extraction_llm = build_extraction_llm(settings.anthropic_api_key)
+    app.state.qa_sql_llm = build_sql_llm(settings.anthropic_api_key)
+    app.state.qa_answer_llm = build_answer_llm(settings.anthropic_api_key)
 
     # Polled by the dashboard's "Sync now" indicator while a manual
     # sync/extract batch is in flight (see /api/sync-progress below).
@@ -44,7 +51,7 @@ async def lifespan(app: FastAPI):
 
     # Scheduled sync (US-02): background fallback, runs every 30 minutes
     # regardless of whether the IMAP IDLE listener is working.
-    app.state.scheduler = create_scheduler(app.state.store, app.state.encryptor, app.state.anthropic)
+    app.state.scheduler = create_scheduler(app.state.store, app.state.encryptor, app.state.extraction_llm)
     app.state.scheduler.start()
 
     # IMAP IDLE listener (US-04): real-time trigger, only started if IMAP
@@ -53,7 +60,7 @@ async def lifespan(app: FastAPI):
     app.state.imap_listener = None
     if settings.gmail_imap_user and settings.gmail_imap_app_password:
         app.state.imap_listener = ImapIdleListener(
-            settings, app.state.store, app.state.encryptor, app.state.anthropic, asyncio.get_running_loop()
+            settings, app.state.store, app.state.encryptor, app.state.extraction_llm, asyncio.get_running_loop()
         )
         app.state.imap_listener.start()
     else:
@@ -175,7 +182,7 @@ async def extract(limit: int | None = 50):
         app.state.sync_progress = {"processed": processed, "total": total}
 
     try:
-        return await run_extraction(app.state.store, app.state.anthropic, limit, on_progress=on_progress)
+        return await run_extraction(app.state.store, app.state.extraction_llm, limit, on_progress=on_progress)
     finally:
         app.state.sync_progress = {"processed": 0, "total": 0}
 
@@ -200,7 +207,7 @@ async def api_sync_and_extract(newer_than: str = "7d", limit: int = 50):
 
     try:
         extraction_result = await run_extraction(
-            app.state.store, app.state.anthropic, limit, on_progress=on_progress
+            app.state.store, app.state.extraction_llm, limit, on_progress=on_progress
         )
     finally:
         app.state.sync_progress = {"processed": 0, "total": 0}
@@ -405,7 +412,7 @@ async def api_qa_ask(body: AskRequest):
     Sonnet 5 translates the question into SQL, the query is validated and
     executed read-only, and the result is composed into a plain-language
     answer (FR-11/FR-12/FR-13)."""
-    result = generate_sql(app.state.anthropic, body.question)
+    result = generate_sql(app.state.qa_sql_llm, body.question)
     if not result.can_answer or not result.sql:
         return {"answer": "I can't answer that from the expense data I have.", "sql": None}
 
@@ -416,5 +423,5 @@ async def api_qa_ask(body: AskRequest):
         return {"answer": "I couldn't safely answer that question.", "sql": None}
 
     rows = await app.state.store.run_readonly_query(sql)
-    answer = compose_answer(app.state.anthropic, body.question, rows)
+    answer = compose_answer(app.state.qa_answer_llm, body.question, rows)
     return {"answer": answer, "sql": sql}

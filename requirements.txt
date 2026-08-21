@@ -23,8 +23,13 @@ APScheduler==3.11.0
 # --- Encryption (AES-256-GCM for OAuth tokens) ---
 cryptography==44.0.0
 
-# --- LLM extraction (M4) ---
+# --- LLM extraction (M4) + Q&A agent (M6) ---
+# experiment/langchain: swapped the raw `anthropic` SDK for `langchain-anthropic`
+# as a provider-abstraction learning exercise (see app/extraction.py,
+# app/qa_agent.py). `anthropic` itself stays pinned since it's still a real
+# runtime dependency of langchain-anthropic.
 anthropic==0.120.2
+langchain-anthropic==1.5.6
 
 # --- Testing ---
 pytest==8.4.2

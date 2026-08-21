@@ -11,12 +11,23 @@ Design notes:
   columns — only `confidence` is set, so a bad guess never silently pollutes
   a spend total before a human reviews it (see flagged_emails handling in
   app.main).
+
+experiment/langchain branch: this module was ported from the raw `anthropic`
+SDK to `langchain-anthropic`, as a learning exercise in swappable-provider
+abstraction. `build_extraction_llm()` returns a LangChain Runnable (already
+bound to ExtractionResult via `with_structured_output(..., method=
+"json_schema")` — the `method="json_schema"` is important: LangChain's
+default (`method="function_calling"`) forces structured output via tool
+calling, which the library itself warns is not reliable when `thinking` is
+enabled; `json_schema` instead uses Claude's native `output_config.format`
+mechanism, the same one the raw-SDK version used via `.parse()`.
 """
 
 import datetime as dt
 from typing import Literal
 
-from anthropic import Anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 CONFIDENCE_THRESHOLD = 0.7
@@ -89,28 +100,21 @@ class ExtractionResult(BaseModel):
     confidence: float
 
 
-def extract_transaction(
-    client: Anthropic, raw_subject: str, raw_from: str, raw_body: str
-) -> ExtractionResult:
-    """Call Claude Haiku 4.5 to extract structured fields from one email."""
-    response = client.messages.parse(
-        model="claude-haiku-4-5",
-        max_tokens=1024,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Subject: {raw_subject}\nFrom: {raw_from}\n\nBody:\n{raw_body}"
-                ),
-            }
-        ],
-        output_format=ExtractionResult,
-    )
-    return response.parsed_output
+def build_extraction_llm(api_key: str):
+    """Build the LangChain Runnable used by extract_transaction(), bound to
+    ExtractionResult via the native JSON-schema output path (not tool
+    calling — see module docstring)."""
+    llm = ChatAnthropic(model="claude-haiku-4-5", max_tokens=1024, api_key=api_key)
+    return llm.with_structured_output(ExtractionResult, method="json_schema")
+
+
+def extract_transaction(llm, raw_subject: str, raw_from: str, raw_body: str) -> ExtractionResult:
+    """Call Claude Haiku 4.5 (via the Runnable from build_extraction_llm) to
+    extract structured fields from one email."""
+    messages = [
+        SystemMessage(
+            content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+        ),
+        HumanMessage(content=f"Subject: {raw_subject}\nFrom: {raw_from}\n\nBody:\n{raw_body}"),
+    ]
+    return llm.invoke(messages)
