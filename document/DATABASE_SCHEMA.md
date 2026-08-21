@@ -2,8 +2,8 @@
 
 - **Database:** PostgreSQL 15+
 - **Authoritative source:** `migrations/001_epic1.sql` through
-  `migrations/005_soft_delete_transactions.sql`
-- **Last updated:** 2026-08-21
+  `migrations/006_transactions_date_no_tz.sql`
+- **Last updated:** 2026-08-22
 
 This document explains the Epic 1 schema column by column, the design rationale
 behind each table, and how the tables relate within the ingestion pipeline.
@@ -54,6 +54,15 @@ oauth_tokens = separate; holds the encrypted Gmail access grant.
 5. **All timestamps are `TIMESTAMPTZ`** (timezone-aware), defaulting to `now()`.
 6. **UUID primary keys via `gen_random_uuid()`** — built into PostgreSQL 13+, no
    extension required.
+7. **`transactions.date` is `DATE`, not `TIMESTAMPTZ`** *(006)*. It
+   represents a calendar day (a transaction's date), not a point in time —
+   storing it as `TIMESTAMPTZ` meant Postgres rendered the same stored
+   instant as a different calendar day depending on the *reading* session's
+   timezone. This surfaced as a real bug: local Postgres defaults to
+   `Asia/Jakarta`, Railway's managed Postgres defaults to `Etc/UTC`, so
+   every transaction dumped from local into production displayed one day
+   earlier there. `DATE` has no timezone conversion at all, so the same
+   value always round-trips identically everywhere.
 
 ---
 
@@ -69,7 +78,7 @@ One row = one transaction successfully extracted from an email.
 | `raw_subject` | `TEXT` | original email subject |
 | `raw_from` | `TEXT` | original sender |
 | `raw_body` | `TEXT` | original email body, kept for audit/debugging |
-| `date` | `TIMESTAMPTZ` | transaction date (extracted) |
+| `date` | `DATE` | transaction date (extracted). Was `TIMESTAMPTZ` until *(006)* — see the "Design decisions" note below |
 | `merchant` | `TEXT` | e.g. "Shopee", "Indomaret" |
 | `amount` | `NUMERIC(15,2)` | transaction amount |
 | `currency` | `TEXT NOT NULL DEFAULT 'IDR'` | IDR for the MVP |

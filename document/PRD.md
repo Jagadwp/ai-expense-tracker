@@ -1,9 +1,23 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.7
+- **Version:** 4.8
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-21
+- **Last updated:** 2026-08-22
+
+> Changelog from v4.7: fixed a real production bug found post-deploy —
+> every transaction displayed one day earlier on Railway than locally, even
+> though the underlying data was identical. Root cause: `transactions.date`
+> was `TIMESTAMPTZ`, and Postgres renders a stored instant using the
+> *reading* session's timezone — local Postgres defaults to `Asia/Jakarta`,
+> Railway's managed Postgres to `Etc/UTC`, so the same midnight-Jakarta
+> instant rendered as the previous day under a UTC session. `date` is a
+> calendar day, not a point in time, so migration 006 changes the column
+> to `DATE` (no timezone conversion at all), re-deriving each existing
+> row's correct day via `AT TIME ZONE 'Asia/Jakarta'` and applying it to
+> both databases. Verified `date_trunc()` (used by the spend-trend charts)
+> is unaffected by the same class of bug post-fix — confirmed empirically,
+> not assumed.
 
 > Changelog from v4.6: deployed to production on **Railway** (M7, partial —
 > alerts still not built). Single service: a multi-stage `Dockerfile` builds
