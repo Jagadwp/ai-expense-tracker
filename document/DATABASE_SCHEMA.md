@@ -2,8 +2,8 @@
 
 - **Database:** PostgreSQL 15+
 - **Authoritative source:** `migrations/001_epic1.sql` through
-  `migrations/006_transactions_date_no_tz.sql`
-- **Last updated:** 2026-08-22
+  `migrations/007_email_received_at.sql`
+- **Last updated:** 2026-08-26
 
 This document explains the Epic 1 schema column by column, the design rationale
 behind each table, and how the tables relate within the ingestion pipeline.
@@ -90,6 +90,7 @@ One row = one transaction successfully extracted from an email.
 | `is_transfer` | `BOOLEAN NOT NULL DEFAULT false` | *(003)* true = fund movement, not real spend; excluded from spend aggregates but still listed for audit |
 | `is_manual` | `BOOLEAN NOT NULL DEFAULT false` | *(004)* true = added by hand from the dashboard, not extracted from an email; `message_id` is a synthesized `manual:<uuid>` for these rows |
 | `deleted_at` | `TIMESTAMPTZ` | *(005)* non-`NULL` = soft-deleted from the dashboard. Every read path (dashboard queries, the Q&A agent) filters `deleted_at IS NULL` |
+| `email_received_at` | `TIMESTAMPTZ` | *(007)* Gmail's own delivery timestamp, captured at ingestion. Two uses: a fallback for `date` when the email body states no transaction date itself (a real case: a blu/PLN receipt with no date field at all), and a secondary sort key so same-day rows in the transaction table order chronologically instead of arbitrarily (`date` alone has no time component) |
 
 **Indexes:** `idx_transactions_date (date DESC)`, `idx_transactions_category (category)`.
 

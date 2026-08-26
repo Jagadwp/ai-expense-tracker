@@ -48,7 +48,15 @@ async def run_extraction(
 
     for i, tx in enumerate(candidates, start=1):
         try:
-            result = extract_transaction(extraction_llm, tx.raw_subject, tx.raw_from, tx.raw_body)
+            result = extract_transaction(
+                extraction_llm, tx.raw_subject, tx.raw_from, tx.raw_body, tx.email_received_at
+            )
+            # Defense-in-depth: don't rely solely on the model following the
+            # "use the received date as a fallback" instruction — a real
+            # transaction with a NULL date is invisible to every
+            # date-filtered dashboard query, so force the fallback here too.
+            if result.date is None and tx.email_received_at is not None:
+                result.date = tx.email_received_at.date()
 
             if not result.is_transaction:
                 await store.delete_non_transaction(tx.message_id)

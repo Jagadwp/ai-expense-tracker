@@ -69,6 +69,10 @@ account holder's own name, or another bank account, where the email gives \
 no indication it's paying for goods or a service. False for purchases, \
 bills, and payments to a merchant or service provider, even if the payment \
 method happens to be a bank transfer.
+- date: the transaction date stated in the email body. If the body states \
+no explicit date, use the provided "Email received" date instead of \
+returning null — these are transaction notifications sent the same day the \
+transaction happened.
 - amount: the transaction amount in the original currency, as a plain number.
 - currency: always "IDR" for these senders.
 - category: your best guess from the fixed set given the merchant and \
@@ -108,13 +112,27 @@ def build_extraction_llm(api_key: str):
     return llm.with_structured_output(ExtractionResult, method="json_schema")
 
 
-def extract_transaction(llm, raw_subject: str, raw_from: str, raw_body: str) -> ExtractionResult:
+def extract_transaction(
+    llm,
+    raw_subject: str,
+    raw_from: str,
+    raw_body: str,
+    email_received_at: dt.datetime | None = None,
+) -> ExtractionResult:
     """Call Claude Haiku 4.5 (via the Runnable from build_extraction_llm) to
-    extract structured fields from one email."""
+    extract structured fields from one email.
+
+    email_received_at (Gmail's own delivery timestamp) is passed as a
+    fallback date the model can use when the email body itself states
+    none — without it, a transaction with a NULL date is invisible to
+    every date-filtered dashboard query."""
+    received_line = f"\nEmail received: {email_received_at.date()}" if email_received_at else ""
     messages = [
         SystemMessage(
             content=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
         ),
-        HumanMessage(content=f"Subject: {raw_subject}\nFrom: {raw_from}\n\nBody:\n{raw_body}"),
+        HumanMessage(
+            content=f"Subject: {raw_subject}\nFrom: {raw_from}{received_line}\n\nBody:\n{raw_body}"
+        ),
     ]
     return llm.invoke(messages)

@@ -34,12 +34,19 @@ class RawTransaction:
 
     Extraction fields (date, merchant, amount, category, ...) are filled in
     later by the LLM step (M4) and are NULL until then.
+
+    email_received_at is Gmail's own delivery timestamp — a fallback date
+    source for extraction when the email body itself states no transaction
+    date (so the row still gets a usable date instead of a NULL one,
+    invisible to every date-filtered query), and a secondary sort key so
+    same-day transactions order chronologically instead of arbitrarily.
     """
 
     message_id: str
     raw_subject: str
     raw_from: str
     raw_body: str
+    email_received_at: datetime | None = None
 
 
 class Store:
@@ -181,11 +188,12 @@ class Store:
         async with self._conn.cursor() as cur:
             await cur.execute(
                 """
-                INSERT INTO transactions (message_id, raw_subject, raw_from, raw_body)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO transactions
+                    (message_id, raw_subject, raw_from, raw_body, email_received_at)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (message_id) DO NOTHING
                 """,
-                (tx.message_id, tx.raw_subject, tx.raw_from, tx.raw_body),
+                (tx.message_id, tx.raw_subject, tx.raw_from, tx.raw_body, tx.email_received_at),
             )
         await self._conn.commit()
 
@@ -201,7 +209,7 @@ class Store:
         """Return raw transactions not yet extracted, excluding any already
         flagged for review (so a flagged email isn't retried every run)."""
         query = """
-            SELECT message_id, raw_subject, raw_from, raw_body
+            SELECT message_id, raw_subject, raw_from, raw_body, email_received_at
             FROM transactions
             WHERE extracted_at IS NULL
               AND deleted_at IS NULL
@@ -218,7 +226,11 @@ class Store:
         await self._conn.commit()
         return [
             RawTransaction(
-                message_id=row[0], raw_subject=row[1], raw_from=row[2], raw_body=row[3]
+                message_id=row[0],
+                raw_subject=row[1],
+                raw_from=row[2],
+                raw_body=row[3],
+                email_received_at=row[4],
             )
             for row in rows
         ]
@@ -380,6 +392,10 @@ class Store:
         this module, not hidden from the list."""
         order_column = self._SORT_COLUMNS.get(sort_by, "date")
         order_dir = "ASC" if sort_dir == "asc" else "DESC"
+        # date alone has no time component (it's a calendar day, migration
+        # 006) — break ties chronologically using Gmail's own delivery
+        # timestamp, so same-day rows don't sort arbitrarily.
+        tiebreaker = f", email_received_at {order_dir} NULLS LAST" if order_column == "date" else ""
 
         conditions = ["extracted_at IS NOT NULL", "deleted_at IS NULL", "date >= %s", "date < %s"]
         params: list = [date_from, date_to + timedelta(days=1)]
@@ -398,7 +414,7 @@ class Store:
             SELECT message_id, date, merchant, category, amount, payment_method, is_transfer, is_manual
             FROM transactions
             WHERE {where_clause}
-            ORDER BY {order_column} {order_dir} NULLS LAST
+            ORDER BY {order_column} {order_dir} NULLS LAST{tiebreaker}
             LIMIT %s OFFSET %s
         """
         async with self._conn.cursor() as cur:

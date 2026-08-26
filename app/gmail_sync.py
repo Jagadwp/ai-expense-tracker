@@ -8,6 +8,8 @@ sync (FR-06): failures are recorded in flagged_emails and the loop continues.
 
 import base64
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -15,6 +17,8 @@ from googleapiclient.discovery import build
 from app.store import RawTransaction, Store
 
 logger = logging.getLogger(__name__)
+
+JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
 
 
 def _build_query(sender_filters: list[str], newer_than: str) -> str:
@@ -144,11 +148,21 @@ class GmailSyncer:
         raw_from = headers.get("From", "")
         raw_body = _decode_body(message.get("payload", {}))
 
+        # Gmail's own delivery timestamp (epoch ms, UTC) — a fallback date
+        # source for extraction when the email body states no transaction
+        # date itself, and a secondary sort key for same-day ordering (see
+        # migration 007).
+        email_received_at = None
+        internal_date = message.get("internalDate")
+        if internal_date:
+            email_received_at = datetime.fromtimestamp(int(internal_date) / 1000, tz=JAKARTA_TZ)
+
         await self._store.save_raw_transaction(
             RawTransaction(
                 message_id=message_id,
                 raw_subject=raw_subject,
                 raw_from=raw_from,
                 raw_body=raw_body,
+                email_received_at=email_received_at,
             )
         )

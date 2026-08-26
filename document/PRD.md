@@ -1,9 +1,21 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.8
+- **Version:** 4.9
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-22
+- **Last updated:** 2026-08-26
+
+> Changelog from v4.8: fixed a second production bug — some transaction
+> emails never state an explicit transaction date in the body at all (a
+> real case: a blu/PLN electricity-token receipt), and a `NULL` `date` made
+> the row invisible everywhere in the dashboard, since every query filters
+> by date range. Extraction now falls back to Gmail's own delivery
+> timestamp (captured at ingestion as `email_received_at`, migration 007)
+> when the LLM finds no date in the body — passed as context to the model,
+> and enforced in code either way (`app/extract_runner.py`) so it isn't
+> solely reliant on the model following the instruction. This timestamp
+> also fixes same-day sort ordering in the transaction table: `date` alone
+> (a plain calendar day since v4.7) has no time component to order by.
 
 > Changelog from v4.7: fixed a real production bug found post-deploy —
 > every transaction displayed one day earlier on Railway than locally, even

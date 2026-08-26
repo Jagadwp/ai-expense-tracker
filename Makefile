@@ -36,6 +36,7 @@ migrate:
 	psql "$$DATABASE_URL" -f migrations/004_add_is_manual.sql
 	psql "$$DATABASE_URL" -f migrations/005_soft_delete_transactions.sql
 	psql "$$DATABASE_URL" -f migrations/006_transactions_date_no_tz.sql
+	psql "$$DATABASE_URL" -f migrations/007_email_received_at.sql
 
 # Run backend tests.
 test:
