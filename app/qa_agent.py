@@ -29,8 +29,14 @@ conflict with extended reasoning).
 import re
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict
+
+# How many prior exchanges generate_sql() sees, so a follow-up like "and
+# last month?" or "what about transport" can be resolved against the
+# conversation instead of always starting from a blank slate. Capped so a
+# long chat session doesn't grow the prompt (and its cost) unboundedly.
+MAX_HISTORY_TURNS = 5
 
 MODEL = "claude-sonnet-5"
 
@@ -38,7 +44,7 @@ SCHEMA_DESCRIPTION = """\
 Table: transactions (the only table available for querying)
 - message_id (text): unique identifier for the transaction/email. Select \
 this when the user asks for an "id", "transaction id", or similar.
-- date (timestamptz): transaction date
+- date (date): transaction date (calendar day, no time component)
 - merchant (text): merchant or recipient name
 - amount (numeric): amount in IDR
 - category (text): one of food, transport, shopping, bills, entertainment, other
@@ -49,6 +55,9 @@ free-text values (e.g. "BI Fast", "blu") since this wasn't backfilled.
 - is_transfer (boolean): true means a fund transfer/movement, NOT a real
   expense. Exclude is_transfer = true from spend totals unless the question
   specifically asks about transfers.
+- is_manual (boolean): true means the transaction was added by hand from \
+the dashboard rather than extracted from an email. Select/filter on this \
+when the user asks about "manual" transactions or entries.
 - confidence (numeric), extracted_at (timestamptz): a row is a valid,
   extracted transaction only when extracted_at IS NOT NULL.
 - deleted_at (timestamptz): non-NULL means the user deleted this transaction
@@ -76,6 +85,15 @@ personal expenses in one or two short sentences, given the question and \
 the raw SQL query result (JSON rows). Amounts are in Indonesian Rupiah \
 (IDR) — format them like "Rp 450.000". If the rows are empty or all-null, \
 say plainly that there's no data for that, rather than guessing."""
+
+
+class QaTurn(BaseModel):
+    """One prior question/answer pair, as sent by the frontend for
+    follow-up context. Only successful exchanges are meant to be included —
+    the frontend filters out errors/declines before sending."""
+
+    question: str
+    answer: str
 
 
 class SqlGenerationResult(BaseModel):
@@ -150,15 +168,24 @@ def build_answer_llm(api_key: str) -> ChatAnthropic:
     )
 
 
-def generate_sql(llm, question: str) -> SqlGenerationResult:
+def generate_sql(llm, question: str, history: list[QaTurn] | None = None) -> SqlGenerationResult:
     """Call Claude Sonnet 5 (via the Runnable from build_sql_llm) to
-    translate a question into SQL, or decline."""
+    translate a question into SQL, or decline.
+
+    history (most recent last) is replayed as real conversation turns
+    before the new question, so a follow-up like "and last month?" resolves
+    against what was actually asked/answered rather than in isolation. Only
+    the last MAX_HISTORY_TURNS are used, regardless of how much the caller
+    sends, to keep prompt size (and cost) bounded."""
     messages = [
         SystemMessage(
             content=[{"type": "text", "text": SQL_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
         ),
-        HumanMessage(content=question),
     ]
+    for turn in (history or [])[-MAX_HISTORY_TURNS:]:
+        messages.append(HumanMessage(content=turn.question))
+        messages.append(AIMessage(content=turn.answer))
+    messages.append(HumanMessage(content=question))
     return llm.invoke(messages)
 
 

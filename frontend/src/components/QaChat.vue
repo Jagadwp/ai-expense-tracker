@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { askQuestion } from '../api'
-import type { QaExchange } from '../types'
+import type { QaExchange, QaTurn } from '../types'
+
+// How many prior exchanges to send as follow-up context — mirrors
+// MAX_HISTORY_TURNS in app/qa_agent.py (the backend caps it too; this just
+// avoids sending more than necessary).
+const MAX_HISTORY_TURNS = 5
 
 const question = ref('')
 const exchanges = ref<QaExchange[]>([])
@@ -13,10 +18,18 @@ async function scrollToBottom() {
   listEl.value?.scrollTo({ top: listEl.value.scrollHeight, behavior: 'smooth' })
 }
 
+function recentHistory(): QaTurn[] {
+  return exchanges.value
+    .filter((ex): ex is QaExchange & { answer: string } => ex.answer !== null && !ex.error)
+    .slice(-MAX_HISTORY_TURNS)
+    .map((ex) => ({ question: ex.question, answer: ex.answer }))
+}
+
 async function ask() {
   const q = question.value.trim()
   if (!q || asking.value) return
 
+  const history = recentHistory()
   const exchange: QaExchange = { question: q, answer: null, sql: null, error: null }
   exchanges.value.push(exchange)
   question.value = ''
@@ -24,7 +37,7 @@ async function ask() {
   await scrollToBottom()
 
   try {
-    const result = await askQuestion(q)
+    const result = await askQuestion(q, history)
     exchange.answer = result.answer
     exchange.sql = result.sql
   } catch (err) {
@@ -34,11 +47,18 @@ async function ask() {
     await scrollToBottom()
   }
 }
+
+function newChat() {
+  exchanges.value = []
+}
 </script>
 
 <template>
   <div class="qa-card">
-    <h3>Ask about your expenses</h3>
+    <div class="header">
+      <h3>Ask about your expenses</h3>
+      <button v-if="exchanges.length" type="button" class="new-chat" @click="newChat">New chat</button>
+    </div>
 
     <div v-if="exchanges.length" ref="listEl" class="exchanges">
       <div v-for="(ex, i) in exchanges" :key="i" class="exchange">
@@ -78,6 +98,26 @@ async function ask() {
 h3 {
   margin: 0;
   font-size: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.new-chat {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.new-chat:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .exchanges {

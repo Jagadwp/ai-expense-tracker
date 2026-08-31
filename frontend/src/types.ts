@@ -64,6 +64,11 @@ export interface QaExchange {
   error: string | null
 }
 
+export interface QaTurn {
+  question: string
+  answer: string
+}
+
 export interface Filters {
   category: string | null
   dateFrom: string

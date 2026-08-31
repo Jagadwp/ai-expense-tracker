@@ -6,6 +6,7 @@ import type {
   Filters,
   PeriodComparison,
   QaAnswer,
+  QaTurn,
   SyncAndExtractResult,
   SyncProgress,
   TransactionDetail,
@@ -151,14 +152,14 @@ export function fetchSyncProgress(): Promise<SyncProgress> {
   return getJson('/api/sync-progress')
 }
 
-export async function askQuestion(question: string): Promise<QaAnswer> {
+export async function askQuestion(question: string, history: QaTurn[] = []): Promise<QaAnswer> {
   const res = await fetch('/api/qa/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, history }),
   })
   if (!res.ok) {
-    throw new Error(`ask failed: ${res.status}`)
+    throw new Error(await errorDetail(res))
   }
   return res.json()
 }

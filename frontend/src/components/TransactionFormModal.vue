@@ -46,9 +46,15 @@ const emit = defineEmits<{
   close: []
 }>()
 
+// "Today" always means Indonesia (WIB), not the browser's own timezone —
+// consistent with the backend (app/main.py's JAKARTA_TZ).
+function todayJakarta(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' })
+}
+
 function toInput(detail: Transaction | null | undefined): TransactionInput {
   return {
-    date: detail?.date?.slice(0, 10) ?? '',
+    date: detail?.date?.slice(0, 10) ?? todayJakarta(),
     merchant: detail?.merchant ?? '',
     amount: detail?.amount ?? null,
     currency: 'IDR',
@@ -153,7 +159,7 @@ async function save() {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   width: 100%;
-  max-width: 500px; 
+  max-width: 600px; 
   padding: 1.5rem;
 }
 

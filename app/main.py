@@ -25,7 +25,15 @@ from app.config import get_settings
 from app.extract_runner import run_extraction
 from app.extraction import build_extraction_llm
 from app.imap_idle import ImapIdleListener
-from app.qa_agent import UnsafeSqlError, build_answer_llm, build_sql_llm, compose_answer, generate_sql, validate_sql
+from app.qa_agent import (
+    QaTurn,
+    UnsafeSqlError,
+    build_answer_llm,
+    build_sql_llm,
+    compose_answer,
+    generate_sql,
+    validate_sql,
+)
 from app.scheduler import create_scheduler
 from app.security import Encryptor
 from app.store import NotFoundError, Store
@@ -416,6 +424,7 @@ async def api_category_trend(date_from: date, date_to: date):
 
 class AskRequest(BaseModel):
     question: str
+    history: list[QaTurn] = []
 
 
 @app.post("/api/qa/ask")
@@ -423,8 +432,12 @@ async def api_qa_ask(body: AskRequest):
     """Ask a natural-language question about expense data (M6): Claude
     Sonnet 5 translates the question into SQL, the query is validated and
     executed read-only, and the result is composed into a plain-language
-    answer (FR-11/FR-12/FR-13)."""
-    result = generate_sql(app.state.qa_sql_llm, body.question)
+    answer (FR-11/FR-12/FR-13).
+
+    history (optional) lets a follow-up like "and last month?" resolve
+    against the actual prior exchange instead of being asked in isolation —
+    see generate_sql()."""
+    result = generate_sql(app.state.qa_sql_llm, body.question, body.history)
     if not result.can_answer or not result.sql:
         return {"answer": "I can't answer that from the expense data I have.", "sql": None}
 
