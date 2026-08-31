@@ -77,7 +77,14 @@ function newChat() {
     <p v-else class="empty">Ask things like "how much did I spend on food last month?"</p>
 
     <form class="composer" @submit.prevent="ask">
-      <input v-model="question" type="text" placeholder="Ask a question about your expenses…" :disabled="asking" />
+      <label for="qa-question" class="sr-only">Ask a question about your expenses</label>
+      <input
+        id="qa-question"
+        v-model="question"
+        type="text"
+        placeholder="Ask a question about your expenses…"
+        :disabled="asking"
+      />
       <button type="submit" :disabled="asking || !question.trim()">Ask</button>
     </form>
   </div>
@@ -185,6 +192,18 @@ h3 {
   color: var(--text-secondary);
   font-size: 0.9rem;
   margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .composer {

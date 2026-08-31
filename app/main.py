@@ -43,6 +43,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+TRANSACTION_NOT_FOUND = "transaction not found"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -283,7 +285,7 @@ async def api_transaction_detail(message_id: str):
     transaction, for the dashboard's email-preview modal."""
     detail = await app.state.store.get_transaction_detail(message_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="transaction not found")
+        raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
     return detail
 
 
@@ -297,7 +299,7 @@ async def api_set_is_transfer(message_id: str, body: SetTransferRequest):
     dashboard's email-preview modal."""
     detail = await app.state.store.get_transaction_detail(message_id)
     if detail is None:
-        raise HTTPException(status_code=404, detail="transaction not found")
+        raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
     await app.state.store.set_is_transfer(message_id, body.is_transfer)
     return {"status": "ok"}
 
@@ -346,7 +348,7 @@ async def api_update_transaction(message_id: str, body: TransactionInput):
         is_transfer=body.is_transfer,
     )
     if not updated:
-        raise HTTPException(status_code=404, detail="transaction not found")
+        raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
     return {"status": "ok"}
 
 
@@ -358,7 +360,7 @@ async def api_delete_transaction(message_id: str):
     re-sync."""
     deleted = await app.state.store.delete_transaction(message_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="transaction not found")
+        raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
     return {"status": "ok"}
 
 
