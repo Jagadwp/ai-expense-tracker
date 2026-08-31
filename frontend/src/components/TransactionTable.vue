@@ -118,6 +118,40 @@ function formatDate(value: string | null): string {
     <p v-if="loadError" class="error">Failed to load transactions: {{ loadError }}</p>
     <p v-else-if="!loading && !transactions.length" class="empty">No transactions match the current filters.</p>
     <template v-else>
+      <!-- Phones (≤600px): a table can't reflow into something readable at
+           that width, so it's replaced by this card list instead — same
+           data, same click-to-preview/edit actions. -->
+      <div class="mobile-cards">
+        <div
+          v-for="tx in transactions"
+          :key="tx.message_id"
+          class="tx-card"
+          @click="emit('preview', tx.message_id)"
+        >
+          <div class="tx-card-top">
+            <span class="tx-date">{{ formatDate(tx.date) }}</span>
+            <button class="edit-btn" title="Edit transaction" @click.stop="emit('edit', tx)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
+          </div>
+          <div class="tx-card-main">
+            <span class="tx-merchant">
+              {{ tx.merchant ?? '' }}
+              <span v-if="tx.is_manual" class="badge manual">manual</span>
+            </span>
+            <span class="tx-amount">{{ formatRp(tx.amount) }}</span>
+          </div>
+          <div class="tx-card-meta">
+            <span v-if="tx.category" class="badge">{{ tx.category }}</span>
+            <span v-if="tx.payment_method" class="tx-payment">{{ tx.payment_method }}</span>
+            <span v-if="tx.is_transfer" class="badge transfer">transfer</span>
+          </div>
+        </div>
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -292,6 +326,15 @@ th.sortable:hover {
   border: 1px solid var(--border);
 }
 
+.badge.transfer {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mobile-cards {
+  display: none;
+}
+
 .empty,
 .error {
   color: var(--text-secondary);
@@ -350,5 +393,80 @@ th.sortable:hover {
 .page-nav button:not(:disabled):hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .table-card {
+    padding: 1rem;
+  }
+
+  table {
+    display: none;
+  }
+
+  .mobile-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .tx-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem;
+    cursor: pointer;
+  }
+
+  .tx-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.4rem;
+  }
+
+  .tx-date {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+  }
+
+  .tx-card-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .tx-merchant {
+    font-size: 0.9rem;
+    overflow-wrap: anywhere;
+  }
+
+  .tx-amount {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .tx-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .tx-payment {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .page-nav {
+    justify-content: space-between;
+  }
 }
 </style>

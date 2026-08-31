@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { formatMonthLabel, matchedMonth, monthRange, PRESETS, presetRange, toIsoDate } from '../dateRange'
 import type { Filters } from '../types'
 
@@ -8,6 +8,10 @@ const props = defineProps<{
   availableMonths: string[]
   filters: Filters
 }>()
+
+// Only rendered/relevant on phones (≤600px, see the media query) — on
+// desktop everything is visible at once and this stays unused.
+const showAdvanced = ref(false)
 
 const emit = defineEmits<{
   'update:filters': [Filters]
@@ -52,34 +56,40 @@ const activePreset = computed(() => {
       </button>
     </div>
 
-    <div class="group range">
-      <input type="date" :value="filters.dateFrom" :max="filters.dateTo" @change="update({ dateFrom: ($event.target as HTMLInputElement).value })" />
-      <span class="dash">–</span>
-      <input type="date" :value="filters.dateTo" :min="filters.dateFrom" @change="update({ dateTo: ($event.target as HTMLInputElement).value })" />
-    </div>
+    <button type="button" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+      Filters {{ showAdvanced ? '▲' : '▼' }}
+    </button>
 
-    <div class="group">
-      <select :value="selectedMonth ?? ''" @change="applyMonth(($event.target as HTMLSelectElement).value)">
-        <option value="" disabled>By month</option>
-        <option v-for="m in availableMonths" :key="m" :value="m">{{ formatMonthLabel(m) }}</option>
-      </select>
-    </div>
+    <div class="advanced" :class="{ open: showAdvanced }">
+      <div class="group range">
+        <input type="date" :value="filters.dateFrom" :max="filters.dateTo" @change="update({ dateFrom: ($event.target as HTMLInputElement).value })" />
+        <span class="dash">–</span>
+        <input type="date" :value="filters.dateTo" :min="filters.dateFrom" @change="update({ dateTo: ($event.target as HTMLInputElement).value })" />
+      </div>
 
-    <div class="group">
-      <select :value="filters.category ?? ''" @change="update({ category: ($event.target as HTMLSelectElement).value || null })">
-        <option value="">All categories</option>
-        <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
-      </select>
-    </div>
+      <div class="group">
+        <select :value="selectedMonth ?? ''" @change="applyMonth(($event.target as HTMLSelectElement).value)">
+          <option value="" disabled>By month</option>
+          <option v-for="m in availableMonths" :key="m" :value="m">{{ formatMonthLabel(m) }}</option>
+        </select>
+      </div>
 
-    <label class="checkbox">
-      <input
-        type="checkbox"
-        :checked="filters.includeTransfers"
-        @change="update({ includeTransfers: ($event.target as HTMLInputElement).checked })"
-      />
-      Include transfers
-    </label>
+      <div class="group">
+        <select :value="filters.category ?? ''" @change="update({ category: ($event.target as HTMLSelectElement).value || null })">
+          <option value="">All categories</option>
+          <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+        </select>
+      </div>
+
+      <label class="checkbox">
+        <input
+          type="checkbox"
+          :checked="filters.includeTransfers"
+          @change="update({ includeTransfers: ($event.target as HTMLInputElement).checked })"
+        />
+        Include transfers
+      </label>
+    </div>
   </div>
 </template>
 
@@ -153,5 +163,66 @@ select {
   font-size: 0.85rem;
   color: var(--text-secondary);
   margin-left: auto;
+}
+
+/* On desktop, .advanced must not affect layout at all — its children flow
+   exactly as if they were direct children of .filter-bar, same as before
+   this was introduced. */
+.advanced {
+  display: contents;
+}
+
+.advanced-toggle {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .filter-bar {
+    align-items: stretch;
+  }
+
+  .presets {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .advanced-toggle {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .advanced {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+  }
+
+  .advanced.open {
+    display: flex;
+  }
+
+  .range {
+    flex-wrap: wrap;
+  }
+
+  input[type='date'] {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .checkbox {
+    margin-left: 0;
+  }
 }
 </style>

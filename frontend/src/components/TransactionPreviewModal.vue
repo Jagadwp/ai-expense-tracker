@@ -384,4 +384,15 @@ header h3 {
     overflow-y: auto;
   }
 }
+
+@media (max-width: 600px) {
+  .overlay {
+    padding: 0.75rem;
+  }
+
+  .modal {
+    padding: 1rem;
+    max-height: 95vh;
+  }
+}
 </style>

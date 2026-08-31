@@ -21,7 +21,7 @@ function formatRp(value: number): string {
       <span class="label">Selected period</span>
       <span class="value">{{ formatRp(comparison.current_total) }}</span>
     </div>
-    <div class="metric-card">
+    <div class="metric-card desktop-only">
       <span class="label">Previous period</span>
       <span class="value">{{ formatRp(comparison.previous_total) }}</span>
     </div>
@@ -74,5 +74,19 @@ function formatRp(value: number): string {
 
 .value.positive {
   color: var(--danger);
+}
+
+@media (max-width: 600px) {
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  /* Scoped styles from a parent don't reach elements nested inside this
+     component's own template (only its root) — this rule has to live
+     here, not in App.vue, even though App.vue is what decides which
+     sections are desktop-only. */
+  .desktop-only {
+    display: none;
+  }
 }
 </style>

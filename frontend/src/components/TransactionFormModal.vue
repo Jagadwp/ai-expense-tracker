@@ -259,4 +259,17 @@ select {
 .required {
   color: var(--danger);
 }
+
+@media (max-width: 600px) {
+  .overlay {
+    padding: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .modal {
+    padding: 1rem;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+}
 </style>

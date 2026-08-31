@@ -137,14 +137,16 @@ const hasError = computed(() => loadError.value !== null)
       <template v-else>
         <PeriodComparisonMetrics :comparison="comparison" />
 
-        <CategoryPeriodMetrics :comparisons="categoryComparisons" />
+        <!-- Hidden on phones (≤600px) — secondary analytical detail, not
+             needed for a quick glance. See the media query below. -->
+        <CategoryPeriodMetrics class="desktop-only" :comparisons="categoryComparisons" />
 
-        <div class="charts">
+        <div class="charts desktop-only">
           <CategoryChart :totals="categoryTotals" />
           <TrendChart :trend="spendTrend" />
         </div>
 
-        <CategoryTrendChart :trend="categoryTrend" />
+        <CategoryTrendChart class="desktop-only" :trend="categoryTrend" />
 
         <div class="transactions-header">
           <h2>Transactions</h2>
@@ -260,6 +262,30 @@ main {
 @media (max-width: 800px) {
   .charts {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Phone layout (~5-6"): keep the quick-glance essentials (today's spend,
+   chat, filters, selected-period total, transactions) and drop everything
+   analytical — those charts/breakdowns need a bigger screen to be useful
+   anyway. */
+@media (max-width: 600px) {
+  .topbar {
+    padding: 1rem 1.25rem;
+  }
+
+  main {
+    padding: 1rem 0.75rem 2rem;
+    gap: 1rem;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+
+  .transactions-actions {
+    width: 100%;
+    flex-wrap: wrap;
   }
 }
 </style>
