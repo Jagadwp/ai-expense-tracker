@@ -439,7 +439,8 @@ async def api_qa_ask(body: AskRequest):
     history (optional) lets a follow-up like "and last month?" resolve
     against the actual prior exchange instead of being asked in isolation —
     see generate_sql()."""
-    result = generate_sql(app.state.qa_sql_llm, body.question, body.history)
+    today = datetime.now(JAKARTA_TZ).date()
+    result = generate_sql(app.state.qa_sql_llm, body.question, body.history, today=today)
     if not result.can_answer or not result.sql:
         return {"answer": "I can't answer that from the expense data I have.", "sql": None}
 

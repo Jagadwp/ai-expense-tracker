@@ -27,6 +27,7 @@ conflict with extended reasoning).
 """
 
 import re
+from datetime import date
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -66,8 +67,13 @@ when the user asks about "manual" transactions or entries.
 Always filter WHERE extracted_at IS NOT NULL AND deleted_at IS NULL. Exclude
 is_transfer = true unless the question explicitly asks about transfers."""
 
-SQL_SYSTEM_PROMPT = f"""You translate natural-language questions about a \
+SQL_SYSTEM_PROMPT_TEMPLATE = f"""You translate natural-language questions about a \
 personal expense tracker into a single read-only PostgreSQL query.
+
+Today's date is {{today}} (Asia/Jakarta). When the question names a month, \
+"this year", "last month", etc. without an explicit year, resolve it \
+relative to today's date — not any other year — unless the conversation \
+history makes clear a different year is meant.
 
 {SCHEMA_DESCRIPTION}
 
@@ -168,18 +174,25 @@ def build_answer_llm(api_key: str) -> ChatAnthropic:
     )
 
 
-def generate_sql(llm, question: str, history: list[QaTurn] | None = None) -> SqlGenerationResult:
+def generate_sql(
+    llm, question: str, history: list[QaTurn] | None = None, today: date | None = None
+) -> SqlGenerationResult:
     """Call Claude Sonnet 5 (via the Runnable from build_sql_llm) to
     translate a question into SQL, or decline.
+
+    today anchors relative periods ("this month", "June", "last year") to
+    the caller's current date (Asia/Jakarta) instead of the model's own,
+    possibly stale, sense of "now" — defaults to UTC today if not given.
 
     history (most recent last) is replayed as real conversation turns
     before the new question, so a follow-up like "and last month?" resolves
     against what was actually asked/answered rather than in isolation. Only
     the last MAX_HISTORY_TURNS are used, regardless of how much the caller
     sends, to keep prompt size (and cost) bounded."""
+    system_prompt = SQL_SYSTEM_PROMPT_TEMPLATE.format(today=(today or date.today()).isoformat())
     messages = [
         SystemMessage(
-            content=[{"type": "text", "text": SQL_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}]
+            content=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
         ),
     ]
     for turn in (history or [])[-MAX_HISTORY_TURNS:]:
