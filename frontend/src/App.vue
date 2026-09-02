@@ -135,7 +135,7 @@ const hasError = computed(() => loadError.value !== null)
       <p v-if="hasError" class="error">Failed to load dashboard data: {{ loadError }}</p>
 
       <template v-else>
-        <PeriodComparisonMetrics :comparison="comparison" />
+        <PeriodComparisonMetrics :comparison="comparison" :date-from="filters.dateFrom" :date-to="filters.dateTo" />
 
         <!-- Hidden on phones (≤600px) — secondary analytical detail, not
              needed for a quick glance. See the media query below. -->

@@ -2,13 +2,24 @@
 import { computed } from 'vue'
 import type { PeriodComparison } from '../types'
 
-const props = defineProps<{ comparison: PeriodComparison }>()
+const props = defineProps<{ comparison: PeriodComparison; dateFrom: string; dateTo: string }>()
 
 const delta = computed(() => props.comparison.current_total - props.comparison.previous_total)
 const deltaPct = computed(() => {
   if (props.comparison.previous_total === 0) return null
   return (delta.value / props.comparison.previous_total) * 100
 })
+
+// Both periods span the same number of days (previous_total is the
+// immediately preceding period of the same length — see
+// store.period_comparison()), so one day count applies to both averages.
+const days = computed(() => {
+  const from = new Date(props.dateFrom)
+  const to = new Date(props.dateTo)
+  return Math.max(1, Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1)
+})
+const avgCurrent = computed(() => props.comparison.current_total / days.value)
+const avgPrevious = computed(() => props.comparison.previous_total / days.value)
 
 function formatRp(value: number): string {
   return `Rp ${Math.round(value).toLocaleString('id-ID')}`
@@ -20,10 +31,12 @@ function formatRp(value: number): string {
     <div class="metric-card">
       <span class="label">Selected period</span>
       <span class="value">{{ formatRp(comparison.current_total) }}</span>
+      <span class="avg">avg {{ formatRp(avgCurrent) }}/day</span>
     </div>
     <div class="metric-card desktop-only">
       <span class="label">Previous period</span>
       <span class="value">{{ formatRp(comparison.previous_total) }}</span>
+      <span class="avg">avg {{ formatRp(avgPrevious) }}/day</span>
     </div>
     <div class="metric-card">
       <span class="label">Change</span>
@@ -65,6 +78,12 @@ function formatRp(value: number): string {
 
 .pct {
   font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.avg {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
