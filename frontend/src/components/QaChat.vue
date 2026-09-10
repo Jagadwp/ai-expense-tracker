@@ -131,7 +131,7 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  max-height: 320px;
+  max-height: 560px;
   overflow-y: auto;
 }
 
@@ -234,5 +234,13 @@ h3 {
 .composer button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  /* Text wraps to far more lines at this width, so the same 3 exchanges
+     need noticeably more height than on desktop to stay scroll-free. */
+  .exchanges {
+    max-height: 960px;
+  }
 }
 </style>
