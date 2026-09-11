@@ -10,20 +10,26 @@ plain language.
 
 ## 📸 Screenshot
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/30522f84-4b56-4bc9-beb2-0ba3167be1cb" />
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/607808f4-d9d5-44e4-8406-44e8a21182e8" />
 <br>
 <br>
 
 <table>
-<tr>
-<td><img width="400" alt="image" src="https://github.com/user-attachments/assets/7782d98f-24a1-4f16-b2e0-c4a007edbe90" /></td>
-<td><img width="400" alt="image" src="https://github.com/user-attachments/assets/eb1a0435-fe4b-4acd-9303-4f17e92cb266" /></td>
-</tr>
+  <tr>
+    <td>
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/2d5dc5af-a62d-4df6-84f9-42e6ebe6feec" />
+    </td>
+    <td>
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/eb1a0435-fe4b-4acd-9303-4f17e92cb266" />
+    </td>
+  </tr>
 </table>
 
 ## 🔗 Live Demo
 
 [ai-expense-tracker-production-c5cd.up.railway.app](https://ai-expense-tracker-production-c5cd.up.railway.app)
+<br>
+As a wise man once said, <i>"If possible, don't attack."</i>
 
 ## Features
 
