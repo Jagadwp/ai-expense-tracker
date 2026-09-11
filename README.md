@@ -17,7 +17,7 @@ plain language.
 <table>
   <tr>
     <td>
-      <img width="400" alt="image" src="https://github.com/user-attachments/assets/2d5dc5af-a62d-4df6-84f9-42e6ebe6feec" />
+      <img width="400" alt="image" src="https://github.com/user-attachments/assets/23ee0877-449d-4240-967f-14d1a3516572" />
     </td>
     <td>
       <img width="400" alt="image" src="https://github.com/user-attachments/assets/eb1a0435-fe4b-4acd-9303-4f17e92cb266" />
