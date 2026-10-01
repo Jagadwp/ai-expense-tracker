@@ -181,6 +181,29 @@ not hardcoded). No CRUD API yet — rows are managed by hand via `psql`.
 
 ---
 
+### 7. `transaction_items` — receipt-scan line items *(008)*
+Line items belonging to a transaction, populated either from a receipt
+photo scanned via Claude vision (`POST /api/receipts/scan`, draft-only, not
+persisted on its own) or typed by hand. A scan result is only ever written
+here once a human confirms it — either together with a brand-new
+transaction (one call) or appended to an existing one afterwards
+(`POST /api/transactions/{message_id}/items`) — so a bad scan can never
+pollute the database on its own.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `UUID PK` | `gen_random_uuid()` |
+| `transaction_message_id` | `TEXT NOT NULL REFERENCES transactions(message_id) ON DELETE CASCADE` | FK on `message_id`, not `transactions.id` — this app treats `message_id` as the sole identifier for a transaction everywhere |
+| `name` | `TEXT NOT NULL` | line item description |
+| `quantity` | `NUMERIC(10,2) NOT NULL DEFAULT 1` | defaults to 1 when a receipt doesn't itemize quantity |
+| `unit_price` | `NUMERIC(15,2)` | nullable — not every receipt states a per-unit price |
+| `subtotal` | `NUMERIC(15,2) NOT NULL` | this item's contribution to the transaction total |
+| `created_at` | `TIMESTAMPTZ NOT NULL DEFAULT now()` | row creation time |
+
+**Index:** `idx_transaction_items_message_id (transaction_message_id)`.
+
+---
+
 ## Future-epic tables (not yet created)
 
 These come from the v1.0 PRD and will be added in later epics:

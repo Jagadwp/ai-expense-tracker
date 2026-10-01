@@ -13,8 +13,10 @@ from typing import Literal
 # (Railway defaults to UTC, 7h behind).
 JAKARTA_TZ = ZoneInfo("Asia/Jakarta")
 
+import base64
+
 import psycopg
-from fastapi import FastAPI, HTTPException, Query, Response, status
+from fastapi import FastAPI, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +36,7 @@ from app.qa_agent import (
     generate_sql,
     validate_sql,
 )
+from app.receipt import build_receipt_llm, extract_receipt
 from app.scheduler import create_scheduler
 from app.security import Encryptor
 from app.store import NotFoundError, Store
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
     app.state.extraction_llm = build_extraction_llm(settings.anthropic_api_key)
     app.state.qa_sql_llm = build_sql_llm(settings.anthropic_api_key)
     app.state.qa_answer_llm = build_answer_llm(settings.anthropic_api_key)
+    app.state.receipt_llm = build_receipt_llm(settings.anthropic_api_key)
 
     # Polled by the dashboard's "Sync now" indicator while a manual
     # sync/extract batch is in flight (see /api/sync-progress below).
@@ -304,6 +308,13 @@ async def api_set_is_transfer(message_id: str, body: SetTransferRequest):
     return {"status": "ok"}
 
 
+class TransactionItemInput(BaseModel):
+    name: str
+    quantity: float = 1
+    unit_price: float | None = None
+    subtotal: float
+
+
 class TransactionInput(BaseModel):
     date: date | None
     merchant: str | None
@@ -312,13 +323,15 @@ class TransactionInput(BaseModel):
     category: str | None
     payment_method: str | None
     is_transfer: bool = False
+    items: list[TransactionItemInput] | None = None
 
 
 @app.post("/api/transactions")
 async def api_create_transaction(body: TransactionInput):
     """Add a transaction by hand from the dashboard (no underlying email).
     Immediately included in every aggregate (extracted_at is set right
-    away)."""
+    away). items (optional) confirms a receipt scan's line items alongside
+    the new transaction in one call."""
     message_id = await app.state.store.create_manual_transaction(
         date=body.date,
         merchant=body.merchant,
@@ -327,6 +340,7 @@ async def api_create_transaction(body: TransactionInput):
         category=body.category,
         payment_method=body.payment_method,
         is_transfer=body.is_transfer,
+        items=[item.model_dump() for item in body.items] if body.items else None,
     )
     return {"message_id": message_id}
 
@@ -350,6 +364,37 @@ async def api_update_transaction(message_id: str, body: TransactionInput):
     if not updated:
         raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
     return {"status": "ok"}
+
+
+class AddItemsRequest(BaseModel):
+    items: list[TransactionItemInput]
+
+
+@app.post("/api/transactions/{message_id}/items")
+async def api_replace_transaction_items(message_id: str, body: AddItemsRequest):
+    """Replace an already-existing transaction's line items with a fresh
+    batch (e.g. from a receipt (re-)scan) — not additive, since a re-scan is
+    meant to correct the breakdown rather than duplicate it."""
+    try:
+        await app.state.store.replace_transaction_items(
+            message_id, [item.model_dump() for item in body.items]
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail=TRANSACTION_NOT_FOUND)
+    return {"status": "ok"}
+
+
+@app.post("/api/receipts/scan")
+async def api_receipt_scan(file: UploadFile = File(...)):
+    """Scan a receipt photo with Claude vision and return a DRAFT of its
+    extracted line items — nothing here touches the database (see
+    app.receipt module docstring). The frontend reviews/corrects the draft
+    before confirming it into a transaction via POST /api/transactions or
+    POST /api/transactions/{message_id}/items."""
+    contents = await file.read()
+    image_b64 = base64.b64encode(contents).decode("ascii")
+    mime_type = file.content_type or "image/jpeg"
+    return extract_receipt(app.state.receipt_llm, image_b64, mime_type)
 
 
 @app.delete("/api/transactions/{message_id}")

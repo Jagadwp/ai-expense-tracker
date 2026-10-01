@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { deleteTransaction, fetchTransactionDetail, setIsTransfer } from '../api'
-import type { TransactionDetail } from '../types'
+import { addTransactionItems, deleteTransaction, fetchTransactionDetail, setIsTransfer } from '../api'
+import type { ReceiptScanResult, TransactionDetail, TransactionItemInput } from '../types'
+import ReceiptItemsEditor from './ReceiptItemsEditor.vue'
+import ReceiptScanner from './ReceiptScanner.vue'
 import TransactionFormModal from './TransactionFormModal.vue'
 
 const props = defineProps<{ messageId: string }>()
@@ -69,6 +71,34 @@ function onEdited() {
   load()
 }
 
+const itemsError = ref<string | null>(null)
+// Holds a fresh scan's items for review/editing before they're persisted —
+// confirming replaces (not appends to) whatever items this transaction
+// already had, since a re-scan means "redo the breakdown".
+const draftItems = ref<TransactionItemInput[] | null>(null)
+const savingItems = ref(false)
+
+function onItemsScanned(result: ReceiptScanResult) {
+  itemsError.value = null
+  draftItems.value = result.items.length ? result.items : null
+}
+
+async function saveDraftItems() {
+  if (!draftItems.value) return
+  savingItems.value = true
+  itemsError.value = null
+  try {
+    await addTransactionItems(props.messageId, draftItems.value)
+    draftItems.value = null
+    emit('changed')
+    await load()
+  } catch (err) {
+    itemsError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    savingItems.value = false
+  }
+}
+
 function formatRp(value: number | null): string {
   if (value === null) return ''
   return `Rp ${Math.round(value).toLocaleString('id-ID')}`
@@ -118,6 +148,31 @@ async function copyId() {
             <div><dt>Amount</dt><dd>{{ formatRp(detail.amount) }}</dd></div>
             <div><dt>Payment method</dt><dd>{{ detail.payment_method }}</dd></div>
           </dl>
+
+          <div v-if="detail.items?.length" class="items">
+            <h4>Items</h4>
+            <ol>
+              <li v-for="item in detail.items" :key="item.id">
+                {{ item.name }} × {{ item.quantity }} — {{ formatRp(item.subtotal) }}
+              </li>
+            </ol>
+          </div>
+
+          <div class="add-items">
+            <h4>Scan receipt to add items</h4>
+            <p class="scan-pitch">Scan the receipt, add itemized detail with AI.</p>
+            <div class="scan-body">
+              <ReceiptScanner @scanned="onItemsScanned" />
+              <template v-if="draftItems">
+                <p class="scan-hint">Rescanning replaces the items above — edit before saving if needed.</p>
+                <ReceiptItemsEditor :items="draftItems" @update:items="draftItems = $event" />
+                <button type="button" class="save-items-btn" :disabled="savingItems" @click="saveDraftItems">
+                  {{ savingItems ? 'Saving…' : 'Save items' }}
+                </button>
+              </template>
+            </div>
+            <p v-if="itemsError" class="error">{{ itemsError }}</p>
+          </div>
 
           <div class="transfer-action">
             <span v-if="detail.is_manual" class="badge manual">Manually added</span>
@@ -281,6 +336,56 @@ header h3 {
   font-weight: 600;
 }
 
+.items h4,
+.add-items h4 {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0 0 0.5rem;
+}
+
+.add-items .scan-pitch {
+  margin: -0.25rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.add-items .scan-body {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.add-items .scan-hint {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 0.5rem 0;
+}
+
+.save-items-btn {
+  margin-top: 0.5rem;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.save-items-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.items ol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style: decimal;
+  font-size: 0.85rem;
+}
+
 .transfer-action {
   display: flex;
   flex-direction: column;
@@ -382,6 +487,12 @@ header h3 {
   .body {
     grid-template-columns: 1fr;
     overflow-y: auto;
+  }
+
+  /* Cap the raw email HTML to ~1/3 of the modal on mobile instead of letting it dominate the scroll. */
+  .preview-frame {
+    min-height: 0;
+    max-height: 33vh;
   }
 }
 
