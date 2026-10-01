@@ -51,6 +51,7 @@ const comparison = ref<PeriodComparison>({ current_total: 0, previous_total: 0 }
 const categoryComparisons = ref<CategoryPeriodComparison[]>([])
 const categoryTrend = ref<CategoryTrendPoint[]>([])
 
+const showMobileChart = ref(false)
 const loadError = ref<string | null>(null)
 const previewMessageId = ref<string | null>(null)
 const showAddModal = ref(false)
@@ -76,7 +77,13 @@ function onTransactionEdited() {
   onTransactionsChanged()
 }
 
+// Guards against a slower, superseded request (e.g. a quick preset switch
+// firing two overlapping loads) resolving after a newer one and overwriting
+// its results with stale data.
+let rangeRequestId = 0
+
 async function loadRangeDependent() {
+  const id = ++rangeRequestId
   const [totals, trend, comp, catComp, catTrend] = await Promise.all([
     fetchCategoryTotals(filters.value),
     fetchSpendTrend(filters.value),
@@ -84,6 +91,7 @@ async function loadRangeDependent() {
     fetchCategoryPeriodComparison(filters.value),
     fetchCategoryTrend(filters.value),
   ])
+  if (id !== rangeRequestId) return
   categoryTotals.value = totals
   spendTrend.value = trend
   comparison.value = comp
@@ -136,6 +144,16 @@ const hasError = computed(() => loadError.value !== null)
 
       <template v-else>
         <PeriodComparisonMetrics :comparison="comparison" :date-from="filters.dateFrom" :date-to="filters.dateTo" />
+
+        <!-- Phone-only stand-in for the "Change" card hidden above — same
+             data as the desktop chart below, just collapsed by default so
+             it doesn't cost a quick glance anything. -->
+        <div class="mobile-chart-card mobile-only">
+          <button type="button" class="mobile-chart-toggle" @click="showMobileChart = !showMobileChart">
+            Spend by category {{ showMobileChart ? '▲' : '▼' }}
+          </button>
+          <CategoryChart v-if="showMobileChart" :totals="categoryTotals" embedded />
+        </div>
 
         <!-- Hidden on phones (≤600px) — secondary analytical detail, not
              needed for a quick glance. See the media query below. -->
@@ -223,7 +241,6 @@ main {
 .transactions-header {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
 }
@@ -235,8 +252,12 @@ main {
 
 .transactions-actions {
   display: flex;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .add-btn {
@@ -257,6 +278,31 @@ main {
 
 .error {
   color: var(--danger);
+}
+
+.mobile-only {
+  display: none;
+}
+
+.mobile-chart-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mobile-chart-toggle {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
 }
 
 @media (max-width: 800px) {
@@ -283,9 +329,8 @@ main {
     display: none;
   }
 
-  .transactions-actions {
-    width: 100%;
-    flex-wrap: wrap;
+  .mobile-only {
+    display: flex;
   }
 }
 </style>

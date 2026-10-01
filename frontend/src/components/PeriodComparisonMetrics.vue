@@ -38,7 +38,7 @@ function formatRp(value: number): string {
       <span class="value">{{ formatRp(comparison.previous_total) }}</span>
       <span class="avg">avg {{ formatRp(avgPrevious) }}/day</span>
     </div>
-    <div class="metric-card">
+    <div class="metric-card desktop-only">
       <span class="label">Change</span>
       <span class="value" :class="{ negative: delta < 0, positive: delta > 0 }">
         {{ formatRp(delta) }}

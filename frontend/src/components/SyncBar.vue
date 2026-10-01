@@ -110,11 +110,13 @@ async function extractMore() {
 </template>
 
 <style scoped>
+/* Flattened into App.vue's .transactions-actions (display: contents has no
+   box of its own) so .controls and the status text below are independent
+   flex items there — a long/changing status line can never shift the
+   controls, since it's forced onto its own full-width row instead of
+   sharing a box with them. */
 .sync-bar {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.5rem;
+  display: contents;
 }
 
 .controls {
@@ -149,7 +151,9 @@ select {
 
 .summary {
   display: flex;
+  flex: 1 0 100%;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.75rem;
   font-size: 0.8rem;
   color: var(--text-secondary);
@@ -179,7 +183,7 @@ select {
   color: var(--danger);
   font-size: 0.8rem;
   margin: 0;
-  max-width: 360px;
+  flex: 1 0 100%;
   text-align: right;
 }
 
@@ -187,5 +191,18 @@ select {
   color: var(--text-secondary);
   font-size: 0.8rem;
   margin: 0;
+  flex: 1 0 100%;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .summary {
+    justify-content: flex-start;
+  }
+
+  .error,
+  .progress {
+    text-align: left;
+  }
 }
 </style>

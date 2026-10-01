@@ -218,9 +218,14 @@ API:
 - A category filter, scoped to the transaction table only.
 - A period-over-period metric (selected range vs. the immediately preceding
   range of equal length), broken out overall and per category, a
-  category-breakdown donut chart, a daily spend-trend line chart, and a
-  daily spend-trend line chart per category (one line per category) — all
+  category-breakdown donut chart (each slice's share of the total shown in
+  the legend and on hover), a daily spend-trend line chart, and a daily
+  spend-trend line chart per category (one line per category) — all
   recompute whenever the date range changes.
+- Mobile (≤600px): the "Change" metric card is swapped for a collapsed-by-
+  default copy of the category donut chart in the same spot, and the
+  collapsed "Filters" toggle shows the active date range so it's visible
+  without expanding it.
 - A "Sync now" bar above the transaction table: pick a sync window
   (1d/7d/14d/30d/90d), run a sync + bounded extraction batch in one click,
   see a live "Syncing X of Y" progress indicator (polling

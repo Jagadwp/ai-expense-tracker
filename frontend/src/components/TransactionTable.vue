@@ -40,7 +40,13 @@ const loadError = ref<string | null>(null)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
+// Guards against a slower, superseded request (e.g. a quick preset switch
+// firing two overlapping loads) resolving after a newer one and overwriting
+// its results with stale data.
+let requestId = 0
+
 async function load() {
+  const id = ++requestId
   loading.value = true
   try {
     loadError.value = null
@@ -54,12 +60,14 @@ async function load() {
       page: page.value,
       pageSize: pageSize.value,
     })
+    if (id !== requestId) return
     transactions.value = result.items
     total.value = result.total
   } catch (err) {
+    if (id !== requestId) return
     loadError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    loading.value = false
+    if (id === requestId) loading.value = false
   }
 }
 

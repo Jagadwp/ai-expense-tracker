@@ -1,9 +1,19 @@
 # PRD — AI Expense Tracker
 
-- **Version:** 4.9
+- **Version:** 4.10
 - **Author:** Jagad Wijaya Purnomo
 - **Status:** Active — living document
-- **Last updated:** 2026-08-26
+- **Last updated:** 2026-10-01
+
+> Changelog from v4.9: fixed a real frontend bug — switching date-range
+> presets quickly (e.g. 7D then 1M) could leave the dashboard showing
+> numbers from the slower, superseded request if it resolved after the
+> newer one. `App.vue`'s range-dependent loads and `TransactionTable`'s
+> fetch now tag each request with an incrementing id and discard any
+> response that isn't the latest. Also: the category donut chart shows
+> each slice's percentage, and mobile swaps the "Change" metric card for a
+> collapsed-by-default copy of that chart, with the active date range
+> shown on the collapsed Filters toggle.
 
 > Changelog from v4.8: fixed a second production bug — some transaction
 > emails never state an explicit transaction date in the body at all (a

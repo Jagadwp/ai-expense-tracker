@@ -32,6 +32,20 @@ function applyMonth(yyyyMm: string) {
 
 const selectedMonth = computed(() => matchedMonth(props.filters.dateFrom, props.filters.dateTo))
 
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatShort(iso: string, withYear: boolean): string {
+  const [year, month, day] = iso.split('-').map(Number)
+  return `${day} ${MONTH_SHORT[month - 1]}${withYear ? ` ${year}` : ''}`
+}
+
+// Shown on the collapsed "Filters" toggle (mobile only) so the active date
+// range is visible without expanding it.
+const rangeLabel = computed(() => {
+  const crossesYear = props.filters.dateFrom.slice(0, 4) !== props.filters.dateTo.slice(0, 4)
+  return `${formatShort(props.filters.dateFrom, crossesYear)} – ${formatShort(props.filters.dateTo, crossesYear)}`
+})
+
 const activePreset = computed(() => {
   if (selectedMonth.value) return '1M'
   const today = new Date()
@@ -57,7 +71,8 @@ const activePreset = computed(() => {
     </div>
 
     <button type="button" class="advanced-toggle" @click="showAdvanced = !showAdvanced">
-      Filters {{ showAdvanced ? '▲' : '▼' }}
+      <span class="toggle-range">{{ rangeLabel }}</span>
+      <span>Filters {{ showAdvanced ? '▲' : '▼' }}</span>
     </button>
 
     <div class="advanced" :class="{ open: showAdvanced }">
@@ -189,7 +204,9 @@ select {
   }
 
   .advanced-toggle {
-    display: block;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     width: 100%;
     text-align: left;
     border: 1px solid var(--border);
@@ -198,6 +215,11 @@ select {
     border-radius: 8px;
     padding: 0.5rem 0.75rem;
     font-size: 0.85rem;
+  }
+
+  .toggle-range {
+    color: var(--text-primary);
+    font-weight: 500;
   }
 
   .advanced {
