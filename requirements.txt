@@ -1,6 +1,7 @@
 # --- Web framework ---
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+python-multipart==0.0.20  # required by FastAPI for UploadFile/File (POST /api/receipts/scan)
 
 # --- Config ---
 python-dotenv==1.0.1

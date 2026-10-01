@@ -7,10 +7,12 @@ import type {
   PeriodComparison,
   QaAnswer,
   QaTurn,
+  ReceiptScanResult,
   SyncAndExtractResult,
   SyncProgress,
   TransactionDetail,
   TransactionInput,
+  TransactionItemInput,
   TransactionPage,
   TransactionQuery,
   TrendPoint,
@@ -130,6 +132,31 @@ export async function updateTransaction(messageId: string, input: TransactionInp
   if (!res.ok) {
     throw new Error(await errorDetail(res))
   }
+}
+
+export async function addTransactionItems(messageId: string, items: TransactionItemInput[]): Promise<void> {
+  const res = await fetch(`/api/transactions/${encodeURIComponent(messageId)}/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
+  }
+}
+
+// Multipart upload — doesn't fit postJson (no body) or the JSON POST helpers
+// above (fixed Content-Type: application/json); the browser must set its
+// own multipart boundary header for FormData, so no Content-Type is passed
+// here at all.
+export async function scanReceipt(file: File): Promise<ReceiptScanResult> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const res = await fetch('/api/receipts/scan', { method: 'POST', body: formData })
+  if (!res.ok) {
+    throw new Error(await errorDetail(res))
+  }
+  return res.json()
 }
 
 export async function deleteTransaction(messageId: string): Promise<void> {

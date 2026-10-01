@@ -453,10 +453,23 @@ class Store:
                 (message_id,),
             )
             row = await cur.fetchone()
-        await self._conn.commit()
 
         if row is None:
+            await self._conn.commit()
             return None
+
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, name, quantity, unit_price, subtotal
+                FROM transaction_items
+                WHERE transaction_message_id = %s
+                ORDER BY created_at
+                """,
+                (message_id,),
+            )
+            item_rows = await cur.fetchall()
+        await self._conn.commit()
 
         return {
             "message_id": row[0],
@@ -470,6 +483,16 @@ class Store:
             "payment_method": row[8],
             "is_transfer": row[9],
             "is_manual": row[10],
+            "items": [
+                {
+                    "id": str(item[0]),
+                    "name": item[1],
+                    "quantity": float(item[2]),
+                    "unit_price": float(item[3]) if item[3] is not None else None,
+                    "subtotal": float(item[4]),
+                }
+                for item in item_rows
+            ],
         }
 
     async def set_is_transfer(self, message_id: str, is_transfer: bool) -> None:
@@ -499,13 +522,18 @@ class Store:
         category: str | None,
         payment_method: str | None,
         is_transfer: bool,
+        items: list[dict] | None = None,
     ) -> str:
         """Insert a manually-entered transaction and return its synthesized
         message_id. There's no real Gmail message behind it, so a synthetic
         id (manual:<uuid>) fills the NOT NULL UNIQUE message_id column
         without risking a collision with a real one. extracted_at is set to
         now() so it's included in the dashboard's aggregates immediately, and
-        confidence stays NULL — it isn't an LLM guess."""
+        confidence stays NULL — it isn't an LLM guess.
+
+        items (optional) lets a receipt-scan draft be confirmed into a
+        brand-new transaction and its line items in one call — both commit
+        together atomically so a partial write is never visible."""
         message_id = f"manual:{uuid.uuid4()}"
         async with self._conn.cursor() as cur:
             await cur.execute(
@@ -517,8 +545,49 @@ class Store:
                 """,
                 (message_id, date, merchant, amount, currency, category, payment_method, is_transfer),
             )
+            if items:
+                for item in items:
+                    await cur.execute(
+                        """
+                        INSERT INTO transaction_items
+                            (transaction_message_id, name, quantity, unit_price, subtotal)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (message_id, item["name"], item["quantity"], item.get("unit_price"), item["subtotal"]),
+                    )
         await self._conn.commit()
         return message_id
+
+    async def replace_transaction_items(self, message_id: str, items: list[dict]) -> None:
+        """Replace all line items on an already-existing, non-deleted
+        transaction with a fresh batch (the "confirm a receipt scan onto an
+        existing transaction" path). A re-scan is meant to correct/redo the
+        item breakdown, not pile more rows on top of a previous scan, so
+        this deletes the old items before inserting the new ones — both in
+        the same transaction as a single commit, so a partial write is
+        never visible. Raises NotFoundError if no such transaction exists."""
+        async with self._conn.cursor() as cur:
+            await cur.execute(
+                "SELECT 1 FROM transactions WHERE message_id = %s AND deleted_at IS NULL",
+                (message_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise NotFoundError(f"no transaction for message_id={message_id!r}")
+
+            await cur.execute(
+                "DELETE FROM transaction_items WHERE transaction_message_id = %s", (message_id,)
+            )
+            for item in items:
+                await cur.execute(
+                    """
+                    INSERT INTO transaction_items
+                        (transaction_message_id, name, quantity, unit_price, subtotal)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (message_id, item["name"], item["quantity"], item.get("unit_price"), item["subtotal"]),
+                )
+        await self._conn.commit()
 
     async def update_transaction(
         self,

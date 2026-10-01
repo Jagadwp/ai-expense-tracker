@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { createTransaction, updateTransaction } from '../api'
-import type { Transaction, TransactionInput } from '../types'
+import type { ReceiptScanResult, Transaction, TransactionInput, TransactionItemInput } from '../types'
+import ReceiptItemsEditor from './ReceiptItemsEditor.vue'
+import ReceiptScanner from './ReceiptScanner.vue'
 
 // Fixed sets, not "whatever's already in the data" — category mirrors the
 // LLM extraction schema's enum (app/extraction.py's Category literal), and
@@ -68,6 +70,19 @@ const form = ref<TransactionInput>(toInput(props.editing))
 const saving = ref(false)
 const error = ref<string | null>(null)
 
+// Only offered for brand-new transactions — editing an existing one already
+// has its own line items via TransactionPreviewModal's ReceiptScanner.
+const scannedItems = ref<TransactionItemInput[] | null>(null)
+
+// Pre-fills empty fields only — never silently overwrite something the user
+// already typed themselves.
+function onScanned(result: ReceiptScanResult) {
+  if (!form.value.merchant && result.merchant) form.value.merchant = result.merchant
+  if (!form.value.date && result.date) form.value.date = result.date
+  if (form.value.amount === null && result.total !== null) form.value.amount = result.total
+  scannedItems.value = result.items.length ? result.items : null
+}
+
 async function save() {
   saving.value = true
   error.value = null
@@ -76,6 +91,7 @@ async function save() {
       ...form.value,
       date: form.value.date || null,
       merchant: form.value.merchant || null,
+      ...(scannedItems.value ? { items: scannedItems.value } : {}),
     }
     if (props.editing) {
       await updateTransaction(props.editing.message_id, payload)
@@ -98,6 +114,18 @@ async function save() {
         <h3>{{ editing ? 'Edit transaction' : 'Add transaction' }}</h3>
         <button class="close" @click="emit('close')">✕</button>
       </header>
+
+      <div v-if="!editing" class="scan-section">
+        <span class="scan-label">Scan receipt</span>
+        <p class="scan-pitch">Skip the typing, scan your receipt and let AI do the rest.</p>
+        <div class="scan-body">
+          <ReceiptScanner @scanned="onScanned" />
+          <template v-if="scannedItems">
+            <p class="scan-hint">{{ scannedItems.length }} item(s) will be saved with this transaction — edit before saving if needed.</p>
+            <ReceiptItemsEditor :items="scannedItems" @update:items="scannedItems = $event" />
+          </template>
+        </div>
+      </div>
 
       <form class="fields" @submit.prevent="save">
         <label>
@@ -185,6 +213,39 @@ header h3 {
 
 .close:hover {
   background: var(--bg);
+}
+
+.scan-section {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.scan-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.scan-pitch {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.scan-body {
+  margin-top: 0.75rem;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.scan-hint {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 0.5rem 0 0;
 }
 
 .fields {

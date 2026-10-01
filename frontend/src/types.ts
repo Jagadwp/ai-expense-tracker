@@ -9,10 +9,26 @@ export interface Transaction {
   is_manual: boolean
 }
 
+export interface TransactionItem {
+  id: string
+  name: string
+  quantity: number
+  unit_price: number | null
+  subtotal: number
+}
+
+export interface TransactionItemInput {
+  name: string
+  quantity: number
+  unit_price: number | null
+  subtotal: number
+}
+
 export interface TransactionDetail extends Transaction {
   raw_subject: string | null
   raw_from: string | null
   raw_body: string | null
+  items: TransactionItem[]
 }
 
 export interface TransactionInput {
@@ -23,6 +39,14 @@ export interface TransactionInput {
   category: string | null
   payment_method: string | null
   is_transfer: boolean
+  items?: TransactionItemInput[]
+}
+
+export interface ReceiptScanResult {
+  merchant: string | null
+  date: string | null
+  total: number | null
+  items: TransactionItemInput[]
 }
 
 export interface CategoryTotal {
